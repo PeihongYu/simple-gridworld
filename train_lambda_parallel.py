@@ -70,9 +70,9 @@ for episode in range(EPISODES):
         prob1 = lambdas[i, j] * torch.exp(log_prob)
 
         actions = prior_model(state["vec"])
-        p_action, p_log_prob = model.get_action(actions)
+        p_prob = actions[0][action]
 
-        prob2 = prior_lambdas[i, j] * torch.exp(p_log_prob)
+        prob2 = prior_lambdas[i, j] * p_prob
         shadow_r_ = torch.log(2 * prob1) - torch.log(prob1 + prob2)
 
         shadow_r.append(shadow_r_.item())

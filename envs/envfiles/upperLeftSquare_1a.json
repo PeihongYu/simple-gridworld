@@ -1,0 +1,9 @@
+{
+  "agent_num": 1,
+  "goal_num": 1,
+  "agent_poses": [[0, 0]],
+  "goal_poses": [[9, 9]],
+  "grid_file": "/envfiles/upperLeftSquare_grid.npy",
+  "reward_file": "/envfiles/upperLeftSquare_reward.npy",
+  "img_file": "/envfiles/upperLeftSquare_img.npy"
+}

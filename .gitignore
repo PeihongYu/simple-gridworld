@@ -128,7 +128,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-outputs
+*/outputs
 
 __pycache__
 .idea

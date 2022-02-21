@@ -1,10 +1,7 @@
-import gym
-import pandas as pd
 import numpy as np
 import torch
 import os
-import tensorboardX
-from gridworld import GridWorld
+from envs.gridworld import GridWorld
 from model import actorModel
 import matplotlib.pyplot as plt
 
@@ -20,12 +17,12 @@ FRAMES = 1e8
 env = GridWorld()
 model = actorModel(4, 2).to(DEVICE)
 
-model_dir = 'outputs/gridworld-vec-fix-reinforce'
+model_dir = 'outputs/block/gridworld-vec-fix-reinforce-wprior_parallel0.1'
 # model_dir = 'outputs/gridworld-vec-fix-manhattan-reinforce'
-status = torch.load(model_dir + '/best_params_cloud.ckpt')
+status = torch.load(model_dir + '/last_params_cloud.ckpt')
 model.load_state_dict(status)
 
-prior = torch.load(model_dir + '/prior.pt')
+prior = torch.load(model_dir + '/prior_last.pt')
 
 done = False
 state = env.reset()

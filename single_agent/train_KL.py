@@ -1,41 +1,54 @@
-import gym
 import pandas as pd
 import numpy as np
 import torch
 import os
 import tensorboardX
-from gridworld import GridWorld
+from envs.gridworld import GridWorld
 from model import actorModel
-from utils import calculate_lambda_parallel, calculate_lambda
-from penv import ParallelEnv
+
+
+def get_policy(agent_pos):
+    # left, right, up, down
+    ay, ax = (agent_pos + 9)
+    if ax >= 8:
+        return [0, 0, 1, 0]
+    if ay <= 1:
+        return [0, 1, 0, 0]
+    return [0.25, 0.25, 0.25, 0.25]
+
+
+def KL_divergence(p, q):
+    if 0 in p:
+        p += 1e-9
+        p /= p.sum()
+    if 0 in q:
+        q += 1e-9
+        q /= q.sum()
+    return sum(p[i] * torch.log2(p[i] / q[i]) for i in range(len(p)))
+
 
 os.makedirs("outputs", exist_ok=True)
 
 DEVICE = "cuda:0"
-EPISODES = 60000
+EPISODES = 10000
 STEPS = 1000
 GAMMA = 0.99
 RENDER = False
+use_prior = True
 
 env = GridWorld()
-
-envs = []
-for i in range(16):
-    envs.append(GridWorld())
-env_parallel = ParallelEnv(envs)
-
 model = actorModel(4, 2).to(DEVICE)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
 
-model_dir = 'outputs/gridworld-vec-fix-reinforce-wprior'
+model_dir = 'outputs/block/gridworld-vec-fix-reinforce-wpriorkl0.1'
 os.makedirs(model_dir, exist_ok=True)
 tb_writer = tensorboardX.SummaryWriter(model_dir)
 
-prior_dir = 'outputs/gridworld-vec-fix-reinforce'
-prior_lambdas = torch.load(prior_dir + '/prior.pt')
-prior_model = actorModel(4, 2).to(DEVICE)
-status = torch.load(prior_dir + '/best_params_cloud.ckpt')
-prior_model.load_state_dict(status)
+if use_prior:
+    prior_dir = 'outputs/sparse/gridworld-vec-fix-reinforce'
+    prior_model = actorModel(4, 2).to(DEVICE)
+    status = torch.load(prior_dir + '/best_params_cloud.ckpt')
+    prior_model.load_state_dict(status)
 
 num_frames = 0
 all_rewards = []
@@ -45,9 +58,6 @@ best_rolling = -99999
 pweight = 0.1
 
 for episode in range(EPISODES):
-
-    # lambdas = calculate_lambda_parallel(env_parallel, model)
-    lambdas = calculate_lambda(env, model)
 
     done = False
     step = 0
@@ -64,15 +74,10 @@ for episode in range(EPISODES):
         lp.append(log_prob)
 
         i, j = env.agent_pos
-        prob1 = lambdas[i, j] * torch.exp(log_prob)
-
-        actions = prior_model(state["vec"])
-        p_action, p_log_prob = model.get_action(actions)
-
-        prob2 = prior_lambdas[i, j] * torch.exp(p_log_prob)
-        shadow_r_ = torch.log(2 * prob1) - torch.log(prob1 + prob2)
-
-        shadow_r.append(shadow_r_.item())
+        if use_prior:
+            # prior_dist = prior_model(state["vec"])[0]
+            prior_dist = torch.tensor(get_policy(state["vec"]), dtype=torch.float32, device=DEVICE)
+            shadow_r.append(KL_divergence(actions[0], prior_dist))
 
         state, r_, done, i_ = env.step(action)
         r.append(r_)
@@ -81,13 +86,14 @@ for episode in range(EPISODES):
         if done or step == STEPS:
             state = env.reset()
             all_rewards.append(np.sum(r))
-            all_shadow_rewards.append(np.sum(shadow_r))
+            all_shadow_rewards.append(torch.stack(shadow_r).sum().item())
             all_eplens.append(step)
             step = 0
-            print(f"EPISODE {episode} STEP: {pd.Series(all_eplens).tail(100).mean()} SCORE: {np.sum(r)} roll: {pd.Series(all_rewards).tail(100).mean()}")
+            print(
+                f"EPISODE {episode} STEP: {pd.Series(all_eplens).tail(100).mean()} SCORE: {np.sum(r)} roll: {pd.Series(all_rewards).tail(100).mean()}")
             tb_writer.add_scalar("frames", pd.Series(all_eplens).tail(100).mean(), episode)
             tb_writer.add_scalar("return", pd.Series(all_rewards).tail(100).mean(), episode)
-            tb_writer.add_scalar("shadow return", pd.Series(all_shadow_rewards).tail(100).mean(), episode)
+            tb_writer.add_scalar("KL", pd.Series(all_shadow_rewards).tail(100).mean(), episode)
 
             if episode % 100 == 0:
                 torch.save(model.state_dict(), model_dir + '/last_params_cloud.ckpt')
@@ -99,8 +105,9 @@ for episode in range(EPISODES):
 
     discounted_rewards = []
 
-    r = np.array(r) - pweight * np.array(shadow_r)
-    r = r.tolist()
+    if use_prior:
+        r = torch.tensor(r, dtype=torch.float32, device=DEVICE) - pweight * torch.stack(shadow_r)
+        # r = -torch.stack(shadow_r)
 
     for t in range(len(r)):
         Gt = 0
@@ -110,9 +117,7 @@ for episode in range(EPISODES):
             pw = pw + 1
         discounted_rewards.append(Gt)
 
-    discounted_rewards = np.array(discounted_rewards)
-
-    discounted_rewards = torch.tensor(discounted_rewards, dtype=torch.float32, device=DEVICE)
+    discounted_rewards = torch.stack(discounted_rewards)
     discounted_rewards = (discounted_rewards - torch.mean(discounted_rewards)) / (torch.std(discounted_rewards))
     log_prob = torch.stack(lp)
     policy_gradient = -log_prob * discounted_rewards

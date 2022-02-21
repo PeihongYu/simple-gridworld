@@ -1,4 +1,4 @@
-from gridworld import GridWorld
+from envs.gridworld import GridWorld
 import random
 
 env = GridWorld(10, 10)

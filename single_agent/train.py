@@ -1,14 +1,10 @@
-import gym
 import pandas as pd
 import numpy as np
 import torch
 import os
 import tensorboardX
-from gridworld import GridWorld
+from envs.gridworld import GridWorld
 from model import actorModel
-from tqdm import tqdm
-import math
-
 
 os.makedirs("outputs", exist_ok=True)
 
@@ -17,13 +13,14 @@ EPISODES = 10000
 STEPS = 1000
 GAMMA = 0.99
 RENDER = False
+batch_size = 64
 
 env = GridWorld()
 model = actorModel(4, 2).to(DEVICE)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
 
 # model_dir = 'outputs/gridworld-vec-fix-reinforce-wprior'
-model_dir = 'outputs/gridworld-vec-fix-reinforce2'
+model_dir = 'outputs/block/gridworld-vec-fix-reinforce'
 os.makedirs(model_dir, exist_ok=True)
 tb_writer = tensorboardX.SummaryWriter(model_dir)
 
@@ -31,6 +28,9 @@ num_frames = 0
 all_rewards = []
 all_eplens = []
 best_rolling = -99999
+
+discounted_rewards = []
+log_prob = []
 
 for episode in range(EPISODES):
 
@@ -53,7 +53,7 @@ for episode in range(EPISODES):
         r.append(r_)
         step += 1
 
-        if done or step == STEPS:
+        if done:
             state = env.reset()
             all_rewards.append(np.sum(r))
             all_eplens.append(step)
@@ -71,23 +71,24 @@ for episode in range(EPISODES):
                     torch.save(model.state_dict(), model_dir + '/best_params_cloud.ckpt')
             break
 
-    discounted_rewards = []
+    if not (min(r) == 0 and max(r) == 0):
+        discounted_rewards = []
 
-    for t in range(len(r)):
-        Gt = 0
-        pw = 0
-        for r_ in r[t:]:
-            Gt = Gt + GAMMA ** pw * r_
-            pw = pw + 1
-        discounted_rewards.append(Gt)
+        for t in range(len(r)):
+            Gt = 0
+            pw = 0
+            for r_ in r[t:]:
+                Gt = Gt + GAMMA ** pw * r_
+                pw = pw + 1
+            discounted_rewards.append(Gt)
 
-    discounted_rewards = np.array(discounted_rewards)
+        discounted_rewards = np.array(discounted_rewards)
 
-    discounted_rewards = torch.tensor(discounted_rewards, dtype=torch.float32, device=DEVICE)
-    discounted_rewards = (discounted_rewards - torch.mean(discounted_rewards)) / (torch.std(discounted_rewards))
-    log_prob = torch.stack(lp)
-    policy_gradient = -log_prob * discounted_rewards
+        discounted_rewards = torch.tensor(discounted_rewards, dtype=torch.float32, device=DEVICE)
+        discounted_rewards = (discounted_rewards - torch.mean(discounted_rewards)) / (torch.std(discounted_rewards))
+        log_prob = torch.stack(lp)
+        policy_gradient = -log_prob * discounted_rewards
 
-    model.zero_grad()
-    policy_gradient.sum().backward()
-    optimizer.step()
+        model.zero_grad()
+        policy_gradient.sum().backward()
+        optimizer.step()

@@ -3,7 +3,7 @@ from tqdm import tqdm
 import math
 
 
-def calculate_lambda_parallel(env, model, N=10000):
+def calculate_lambda_parallel(env, model, N=5000):
 
     lambdas = np.zeros([env.envs[0].height, env.envs[0].width])
 
@@ -31,7 +31,7 @@ def calculate_lambda_parallel(env, model, N=10000):
     return lambdas
 
 
-def calculate_lambda(env, model, N=100):
+def calculate_lambda(env, model, N=1000):
     lambdas = np.zeros([env.height, env.width])
 
     for episode in tqdm(range(N)):

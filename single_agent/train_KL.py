@@ -4,7 +4,7 @@ import torch
 import os
 import tensorboardX
 from envs.gridworld import GridWorld
-from model import actorModel
+from algos.model import actorModel
 
 
 def get_policy(agent_pos):

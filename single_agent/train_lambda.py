@@ -4,8 +4,8 @@ import torch
 import os
 import tensorboardX
 from envs.gridworld import GridWorld
-from model import actorModel
-from utils import calculate_lambda
+from algos.model import actorModel
+from lambda_helper import calculate_lambda
 from penv import ParallelEnv
 import time
 import matplotlib.pyplot as plt

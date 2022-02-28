@@ -1,9 +1,0 @@
-{
-  "agent_num": 1,
-  "goal_num": 1,
-  "agent_poses": [[0, 0]],
-  "goal_poses": [[9, 9]],
-  "grid_file": "/envfiles/centerSquare_grid.npy",
-  "reward_file": "/envfiles/centerSquare_reward.npy",
-  "img_file": "/envfiles/centerSquare_img.npy"
-}

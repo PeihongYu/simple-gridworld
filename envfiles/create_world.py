@@ -3,6 +3,14 @@ import json
 import matplotlib.pyplot as plt
 from envs.rendering import fill_coords, point_in_rect, point_in_line, point_in_circle
 
+colors = [
+    (255, 0, 0),  # red
+    (0, 255, 0),  # green
+    (0, 0, 255),  # blue
+    (112, 39, 195),  # purple
+    (255, 255, 0)  # yellow
+]
+
 
 def create_floor(tile_size):
     tile = np.zeros([tile_size, tile_size, 3])
@@ -46,6 +54,7 @@ def initialize_img(grid, reward, tile_size=30):
     floor_tile = create_floor(tile_size)
     wall_tile = create_tile(tile_size, (100, 100, 100))
     lava_tile = create_lava(tile_size)
+    reward_min = reward.min()
 
     for i in range(height):
         for j in range(width):
@@ -54,8 +63,8 @@ def initialize_img(grid, reward, tile_size=30):
             if grid[i, j] == 1:
                 img[x:x + tile_size, y:y + tile_size] = wall_tile
             else:
-                if reward[i, j] == -2:
-                    img[x:x + tile_size, y:y + tile_size] = lava_tile
+                if reward[i, j] < 0:
+                    img[x:x + tile_size, y:y + tile_size] = lava_tile / (reward[i, j] / reward_min)
                 else:
                     img[x:x + tile_size, y:y + tile_size] = floor_tile
     return img
@@ -63,37 +72,68 @@ def initialize_img(grid, reward, tile_size=30):
 
 def update_img(img, agents, goals, tile_size=30):
 
-    colors = [
-        (255, 0, 0),        # red
-        (0, 255, 0),        # green
-        (0, 0, 255),        # blue
-        (112, 39, 195),     # purple
-        (255, 255, 0)       # yellow
-    ]
-
-    height, width, _ = img.shape
-    height = int(height / tile_size)
-
-    for i in range(len(agents)):
-        agent_tile = create_agent(tile_size, colors[i])
+    for i in range(len(goals)):
         goal_tile = create_tile(tile_size, colors[i])
-
-        x = agents[i][0] * tile_size
-        y = agents[i][1] * tile_size
-        img[x:x + tile_size, y:y + tile_size] = agent_tile
-
         x = goals[i][0] * tile_size
         y = goals[i][1] * tile_size
-        img[x:x + tile_size, y:y + tile_size] = goal_tile
+        img[x:x + tile_size, y:y + tile_size] = goal_tile / 2
+
+    for i in range(len(agents)):
+        # agent_tile = create_agent(tile_size, colors[i])
+        x = agents[i][0] * tile_size
+        y = agents[i][1] * tile_size
+        agent_tile = img[x:x + tile_size, y:y + tile_size]
+        fill_coords(agent_tile, point_in_circle(0.5, 0.5, 0.31), colors[i])
+        img[x:x + tile_size, y:y + tile_size] = agent_tile
 
     return img
+
+
+def create_setup_0():
+    file_name = "empty"
+    env_name = "./envfiles/" + file_name
+
+    width = 10
+    height = 10
+    agent_poses = [[0, 0]]
+    goal_poses = [[height - 1, width - 1]]
+    grid = np.zeros([height, width])
+    reward = np.zeros([height, width])
+
+    for i in range(height):
+        for j in range(width):
+            reward[i, j] = -np.linalg.norm(np.array(goal_poses[0]) - np.array([i, j]))
+
+    img = initialize_img(grid, reward)
+
+    json_dict = {
+        "agent_num": 1,
+        "starts": agent_poses,
+        "goals": goal_poses,
+        "grid_file": env_name + "_grid.npy",
+        "reward_file": env_name + "_reward.npy",
+        "img_file": env_name + "_img.npy"
+    }
+
+    np.save(file_name + "_grid.npy", grid)
+    np.save(file_name + "_reward.npy", reward)
+    np.save(file_name + "_img.npy", img)
+
+    with open(file_name + "_1a.json", 'w') as outfile:
+        json.dump(json_dict, outfile, indent=4)
+
+    img = update_img(img, agent_poses, goal_poses)
+    plt.imshow(np.flip(img, axis=0))
+    plt.axis('off')
+    plt.savefig(file_name + "_1a.jpg")
+    plt.close()
 
 
 def create_setup_1():
     # single agent: 10x10 grid map
     # top-left 8x8 grids have -2 as reward
-    file_name = "upperLeftSquare_1a"
-    env_name = "/envfiles/" + file_name
+    file_name = "upperLeftSquare"
+    env_name = "./envfiles/" + file_name
 
     width = 10
     height = 10
@@ -111,9 +151,8 @@ def create_setup_1():
 
     json_dict = {
         "agent_num": 1,
-        "goal_num": 1,
-        "agent_poses": agent_poses,
-        "goal_poses": goal_poses,
+        "starts": agent_poses,
+        "goals": goal_poses,
         "grid_file": env_name + "_grid.npy",
         "reward_file": env_name + "_reward.npy",
         "img_file": env_name + "_img.npy"
@@ -123,13 +162,13 @@ def create_setup_1():
     np.save(file_name + "_reward.npy", reward)
     np.save(file_name + "_img.npy", img)
 
-    with open(file_name + ".json", 'w') as outfile:
-        json.dump(json_dict, outfile)
+    with open(file_name + "_1a.json", 'w') as outfile:
+        json.dump(json_dict, outfile, indent=4)
 
     img = update_img(img, agent_poses, goal_poses)
     plt.imshow(np.flip(img, axis=0))
     plt.axis('off')
-    plt.savefig(file_name + "_img.jpg")
+    plt.savefig(file_name + "_1a.jpg")
     plt.close()
 
 
@@ -137,7 +176,7 @@ def create_setup_2():
     # single agent: 10x10 grid map
     # center 8x8 grids have -2 as reward
     file_name = "centerSquare"
-    env_name = "/envfiles/" + file_name
+    env_name = "./envfiles/" + file_name
 
     width = 10
     height = 10
@@ -155,9 +194,8 @@ def create_setup_2():
 
     json_dict = {
         "agent_num": 1,
-        "goal_num": 1,
-        "agent_poses": agent_poses,
-        "goal_poses": goal_poses,
+        "starts": agent_poses,
+        "goals": goal_poses,
         "grid_file": env_name + "_grid.npy",
         "reward_file": env_name + "_reward.npy",
         "img_file": env_name + "_img.npy"
@@ -168,14 +206,48 @@ def create_setup_2():
     np.save(file_name + "_img.npy", img)
 
     with open(file_name + "_1a.json", 'w') as outfile:
-        json.dump(json_dict, outfile)
+        json.dump(json_dict, outfile, indent=4)
 
     img = update_img(img, agent_poses, goal_poses)
     plt.imshow(np.flip(img, axis=0))
     plt.axis('off')
-    plt.savefig(file_name + "_1a_img.jpg")
+    plt.savefig(file_name + "_1a.jpg")
+    plt.close()
+
+
+def create_setup_3():
+    # two agent: 10x10 grid map
+    # center 8x8 grids have -2 as reward
+    file_name = "centerSquare"
+    env_name = "./envfiles/" + file_name
+
+    width = 10
+    height = 10
+    agent_poses = [[0, 0], [height - 1, width - 1]]
+    goal_poses = [[height - 1, width - 1], [0, 0]]
+    img = np.load(file_name + "_img.npy")
+
+    json_dict = {
+        "agent_num": 2,
+        "starts": agent_poses,
+        "goals": goal_poses,
+        "grid_file": env_name + "_grid.npy",
+        "reward_file": env_name + "_reward.npy",
+        "img_file": env_name + "_img.npy"
+    }
+
+    with open(file_name + "_2a.json", 'w') as outfile:
+        json.dump(json_dict, outfile, indent=4)
+
+    img = update_img(img, agent_poses, goal_poses)
+    plt.imshow(np.flip(img, axis=0))
+    plt.axis('off')
+    plt.savefig(file_name + "_2a.jpg")
     plt.close()
 
 
 if __name__ == '__main__':
-    create_setup_2()
+    create_setup_0()
+    # create_setup_1()
+    # create_setup_2()
+    # create_setup_3()

@@ -1,4 +1,4 @@
-from envs.gridworld_2a import GridWorld2a
+from envs.gridworld import GridWorldEnv
 from envs.window import Window
 
 
@@ -31,60 +31,49 @@ def key_handler(event):
         reset()
         return
     if event.key == 'left':
-        step(env.actions.left)
-        return
-    if event.key == 'right':
-        step(env.actions.right)
-        return
-    if event.key == 'up':
-        step(env.actions.up)
-        return
-    if event.key == 'down':
-        step(env.actions.down)
-        return
-
-
-actions = []
-def key_handler_2a(event):
-    if event.key == 'escape':
-        window.close()
-        return
-    if event.key == 'backspace':
-        reset()
-        return
-    if event.key == 'left':
         actions.append(env.actions.left)
-        if len(actions) == 2:
+        if len(actions) == action_num:
             step(actions)
             actions.clear()
         return
     if event.key == 'right':
         actions.append(env.actions.right)
-        if len(actions) == 2:
+        if len(actions) == action_num:
             step(actions)
             actions.clear()
         return
     if event.key == 'up':
         actions.append(env.actions.up)
-        if len(actions) == 2:
+        if len(actions) == action_num:
             step(actions)
             actions.clear()
         return
     if event.key == 'down':
         actions.append(env.actions.down)
-        if len(actions) == 2:
+        if len(actions) == action_num:
+            step(actions)
+            actions.clear()
+        return
+    if event.key == ' ':
+        actions.append(env.actions.stay)
+        if len(actions) == action_num:
             step(actions)
             actions.clear()
         return
 
+# upperLeftSquare_1a
+# centerSquare_1a
+# centerSquare_2a
+# empty_1a
+env_name = "empty_1a"
+json_file = "./envfiles/" + env_name + ".json"
 
-# env = GridWorld(10, 10, True)
-# window = Window('Grid World')
-# window.reg_key_handler(key_handler)
+env = GridWorldEnv(json_file, True)
+actions = []
+action_num = env.agent_num
 
-env = GridWorld2a(11, 11, True)
 window = Window('Grid World')
-window.reg_key_handler(key_handler_2a)
+window.reg_key_handler(key_handler)
 
 reset()
 

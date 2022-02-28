@@ -1,106 +1,158 @@
 import numpy as np
+import torch
+import json
+import random
+import gym
 from enum import IntEnum
-from gym import spaces
+from envs.rendering import fill_coords, point_in_circle
+from envfiles.create_world import create_tile, colors
 
 # left, right, up, down
 ACTIONS = [(0, -1), (0, 1), (1, 0), (-1, 0)]
 
 
-def point_in_rect(xmin, xmax, ymin, ymax):
-    def fn(x, y):
-        return x >= xmin and x <= xmax and y >= ymin and y <= ymax
-
-    return fn
-
-
-def fill_coords(img, fn, color):
-    """
-    Fill pixels of an image with coordinates matching a filter function
-    """
-    for y in range(img.shape[0]):
-        for x in range(img.shape[1]):
-            yf = (y + 0.5) / img.shape[0]
-            xf = (x + 0.5) / img.shape[1]
-            if fn(xf, yf):
-                img[y, x] = color
-
-    return img
-
-
-class GridWorld:
+class GridWorldEnv(gym.Env):
 
     # Enumeration of possible actions
     class Actions(IntEnum):
-        # Turn left, turn right, move forward
         left = 0
         right = 1
         up = 2
         down = 3
+        stay = 4
 
-    def __init__(self, height=10, width=10, use_image=False):
+    def __init__(self, json_file, visualize=False):
 
-        self.actions = GridWorld.Actions
-        self.action_space = spaces.Discrete(4)
-        self.observation_space = spaces.Box(
-            low=0,
-            high=255,
-            shape=(height, width, 3),
-            dtype='uint8'
-        )
+        with open(json_file) as infile:
+            args = json.load(infile)
+        self.grid = np.load(args["grid_file"])
+        self.reward_mat = np.load(args["reward_file"])
+        self.img = np.load(args["img_file"])
+        self.height, self.width = self.grid.shape
 
-        self.width = width
-        self.height = height
-        self.max_steps = 1000  #(width + height) * 2
+        self.agent_num = args["agent_num"]
+        self.starts = np.array(args["starts"])
+        self.goals = np.array(args["goals"])
+        self.agents = self.starts.copy()
+        self.agents_pre = self.starts.copy()
+        self.collide = False
+
+        self.actions = GridWorldEnv.Actions
+
+        self.state_space = gym.spaces.Box(low=0, high=self.height-1, shape=(2, ), dtype='uint8')
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
+        self.action_space = gym.spaces.Discrete(4) if self.agent_num == 1 else gym.spaces.Discrete(5)
+
+        self.max_steps = 100
         self.step_count = 0
 
-        self.agent_pos = np.zeros(2)
-        self.goal = np.zeros(2)
-
-        self.tile_size = 30
-        self.img = None
+        self.visualize = visualize
+        self.initialize_img()
         self.cur_img = None
         self.window = None
-        self.use_image = use_image
 
         self.reset()
 
     def reset(self):
         self.step_count = 0
-        self.agent_pos = np.array([0, 0])
-        self.goal = np.array([self.height - 1, self.width - 1])
-        self.img = self.initialize_img()
-        self.cur_img = self.update_img()
-        return self.get_obs()
+        self.agents = self.starts.copy()
+        self.agents_pre = self.starts.copy()
+        if self.visualize:
+            self.cur_img = self.img.copy()
+            self.update_img()
+        return self.state
 
-    def step(self, action):
+    @property
+    def state(self):
+        cur_state = {
+            'vec': self.agents.copy()
+        }
+        if self.visualize:
+            cur_state = {
+                'image': np.flip(self.cur_img, axis=0),
+                'vec': self.agents.copy()
+            }
+        return cur_state
+
+    @property
+    def done(self):
+        if np.array_equal(self.agents, self.goals) or (self.step_count >= self.max_steps):
+            done = True
+        else:
+            done = False
+        return done
+
+    def _occupied(self, i, j):
+        if self.grid[i, j] == 1:
+            return True
+        for aid in range(self.agent_num):
+            if np.array_equal(self.agents[aid], [i, j]):
+                self.collide = True
+                return True
+        return False
+
+    def _available_actions(self, agent_pos):
+        available_actions = set()
+        available_actions.add(self.actions.stay)
+        i, j = agent_pos
+
+        assert (0 <= i <= self.height - 1) and (0 <= j <= self.width - 1), \
+            'Invalid indices'
+
+        if (i > 0) and not self._occupied(i - 1, j):
+            available_actions.add(self.actions.down)
+        if (i < self.height - 1) and not self._occupied(i + 1, j):
+            available_actions.add(self.actions.up)
+        if (j > 0) and not self._occupied(i, j - 1):
+            available_actions.add(self.actions.left)
+        if (j < self.width - 1) and not self._occupied(i, j + 1):
+            available_actions.add(self.actions.right)
+
+        return available_actions
+
+    def _transition(self, actions):
+        self.agents_pre = self.agents.copy()
+        for aid in random.sample(range(self.agent_num), self.agent_num):
+            action = actions[aid]
+            if torch.is_tensor(action):
+                action = action.item()
+            if action not in self._available_actions(self.agents[aid]):
+                pass
+            else:
+                i, j = self.agents[aid]
+                if action == self.actions.up:
+                    self.agents[aid] = [i + 1, j]
+                if action == self.actions.down:
+                    self.agents[aid] = [i - 1, j]
+                if action == self.actions.left:
+                    self.agents[aid] = [i, j - 1]
+                if action == self.actions.right:
+                    self.agents[aid] = [i, j + 1]
+
+    def step(self, actions):
+        if not isinstance(actions, list):
+            actions = [actions]
+
         self.step_count += 1
+        self._transition(actions)
 
-        pos_delta = ACTIONS[action]
-        new_x = max(0, min(self.width - 1, self.agent_pos[1] + pos_delta[1]))
-        new_y = max(0, min(self.height - 1, self.agent_pos[0] + pos_delta[0]))
+        if self.visualize:
+            self.update_img()
 
-        # Update position
-        self.agent_pos = [new_y, new_x]
-        if self.use_image:
-            self.cur_img = self.update_img()
-
-        reach_goal = (self.goal[0] == new_y) and (self.goal[1] == new_x)
         reward = self._reward()
-        # if reach_goal:
-        #     reward = self._reward()
-        # else:
-        #     reward = 0
-        done = reach_goal or self.step_count == self.max_steps
+        self.collide = False
 
-        return self.get_obs(), reward, done, reach_goal
+        return self.state, reward, self.done, {}
 
     def _reward(self):
-        i, j = self.agent_pos
-        if i > 1 and j < 8:
-            return -2
-        if (self.goal[0] == i) and (self.goal[1] == j):
-            return 1 - 0.9 * (self.step_count / self.max_steps)
-        return 0
+        rewards = [0] * self.agent_num
+        for aid in range(self.agent_num):
+            i, j = self.agents[aid]
+            if (self.goals[aid][0] == i) and (self.goals[aid][1] == j):
+                rewards[aid] = 1 - 0.9 * (self.step_count / self.max_steps)
+            else:
+                rewards[aid] = -10 if self.collide else self.reward_mat[i, j]
+        return rewards
 
         # version 1: discrete reward only at goal location
         # return 1 - 0.9 * (self.step_count / self.max_steps)
@@ -109,66 +161,35 @@ class GridWorld:
         # version 3: manhattan distance
         # return -abs(self.goal - self.agent_pos).sum()
 
-    def initialize_img(self):
-        img = np.zeros([self.height * self.tile_size, self.width * self.tile_size, 3], dtype=int)
-        tile = np.zeros([self.tile_size, self.tile_size, 3])
-        fill_coords(tile, point_in_rect(0, 0.04, 0, 1), (100, 100, 100))
-        fill_coords(tile, point_in_rect(0.96, 1, 0, 1), (100, 100, 100))
-        fill_coords(tile, point_in_rect(0, 1, 0, 0.04), (100, 100, 100))
-        fill_coords(tile, point_in_rect(0, 1, 0.96, 1), (100, 100, 100))
-        for i in range(self.height):
-            for j in range(self.width):
-                x = i * self.tile_size
-                y = j * self.tile_size
-                img[x:x + self.tile_size, y:y + self.tile_size] = tile
+    def initialize_img(self, tile_size=30):
+        for i in range(len(self.goals)):
+            goal_tile = create_tile(tile_size, colors[i])
+            x = self.goals[i][0] * tile_size
+            y = self.goals[i][1] * tile_size
+            self.img[x:x + tile_size, y:y + tile_size] = goal_tile / 2
 
-        goal_tile = np.zeros([self.tile_size, self.tile_size, 3])
-        fill_coords(goal_tile, point_in_rect(0, 1, 0, 1), (0, 255, 0))
+    def update_img(self, tile_size=30):
+        for i in range(self.agent_num):
+            x = self.agents_pre[i][0] * tile_size
+            y = self.agents_pre[i][1] * tile_size
+            self.cur_img[x:x + tile_size, y:y + tile_size] = self.img[x:x + tile_size, y:y + tile_size].copy()
 
-        x = (self.height - self.goal[0] - 1) * self.tile_size
-        y = self.goal[1] * self.tile_size
-        img[x:x + self.tile_size, y:y + self.tile_size] = goal_tile
+        for i in range(self.agent_num):
+            x = self.agents[i][0] * tile_size
+            y = self.agents[i][1] * tile_size
+            agent_tile = self.cur_img[x:x + tile_size, y:y + tile_size]
+            fill_coords(agent_tile, point_in_circle(0.5, 0.5, 0.31), colors[i])
+            self.cur_img[x:x + tile_size, y:y + tile_size] = agent_tile
 
-        return img
-
-    def update_img(self):
-
-        agent_tile = np.zeros([self.tile_size, self.tile_size, 3])
-        fill_coords(agent_tile, point_in_rect(0, 1, 0, 1), (255, 0, 0))
-
-        img = self.img.copy()
-        x = (self.height - self.agent_pos[0] - 1) * self.tile_size
-        y = self.agent_pos[1] * self.tile_size
-        img[x:x + self.tile_size, y:y + self.tile_size] = agent_tile
-
-        return img
-
-    def render(self):
+    def render(self, mode="human"):
         if not self.window:
             from envs import window
             self.window = window.Window('Grid World')
             self.window.show(block=False)
 
-        if not self.use_image:
-            self.cur_img = self.update_img()
+        if not self.visualize:
+            self.update_img()
         self.window.show_img(self.cur_img)
 
         return self.cur_img
 
-    def get_obs(self):
-        vec = self.agent_pos - self.goal
-        cur_obs = {
-            'vec': vec
-        }
-
-        if self.use_image:
-            arr = np.zeros([self.height, self.width])
-            arr[self.agent_pos[0], self.agent_pos[1]] = 1
-            arr[self.goal[0], self.goal[1]] = 2
-            cur_obs = {
-                'image': self.cur_img,
-                'encode': arr,
-                'vec': vec
-            }
-
-        return cur_obs

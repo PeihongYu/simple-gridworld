@@ -4,7 +4,7 @@ import torch
 import os
 import tensorboardX
 from envs.gridworld_2a import GridWorld2a
-from model import ACModel
+from algos.model import ACModel
 
 np.set_printoptions(precision=2)
 

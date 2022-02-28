@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import os
 from envs.gridworld import GridWorld
-from model import actorModel
+from algos.model import actorModel
 
 os.makedirs("outputs", exist_ok=True)
 

@@ -19,7 +19,7 @@ class REINFORCE(AgentBase):
     def select_action(self, state):
         actions = [0] * self.agent_num
         for aid in range(self.agent_num):
-            dist = self.acmodels[aid](state[aid])
+            dist = self.acmodels[aid](state.flatten())
             action = dist.sample()
             actions[aid] = action
         return actions
@@ -41,7 +41,7 @@ class REINFORCE(AgentBase):
                 action = self.select_action(state["vec"])
                 next_state, reward, done, _ = self.env.step(action)
                 if self.use_prior:
-                    shadow_reward = self.compute_shadow_r(state, action)
+                    shadow_reward = self.compute_shadow_r(state["vec"], action)
                     reward = reward + shadow_reward
                 ep_returns += reward
                 buffer.append(state["vec"], action, reward, done)
@@ -49,7 +49,7 @@ class REINFORCE(AgentBase):
                 steps += 1
                 ep_steps += 1
             if tb_writer:
-                tb_writer.add_info(ep_steps, ep_returns)
+                tb_writer.add_info(ep_steps, ep_returns, self.pweight)
             episodes += 1
         return steps
 
@@ -64,8 +64,7 @@ class REINFORCE(AgentBase):
             normalized_r_sum = r_sum_mean.repeat(1, self.agent_num)
 
         for aid in range(self.agent_num):
-            state_dim = self.env.state_space.shape[0]
-            dist = self.acmodels[aid](buf_state[:, state_dim * aid: state_dim * aid + state_dim])
+            dist = self.acmodels[aid](buf_state)
             log_prob = dist.log_prob(buf_action[:, aid])
             policy_gradient = -log_prob * normalized_r_sum[:, aid]
 

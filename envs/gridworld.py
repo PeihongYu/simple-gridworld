@@ -39,7 +39,7 @@ class GridWorldEnv(gym.Env):
 
         self.actions = GridWorldEnv.Actions
 
-        self.state_space = gym.spaces.Box(low=0, high=self.height-1, shape=(2, ), dtype='uint8')
+        self.state_space = gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8')
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
         self.action_space = gym.spaces.Discrete(4) if self.agent_num == 1 else gym.spaces.Discrete(5)
 
@@ -82,10 +82,15 @@ class GridWorldEnv(gym.Env):
             done = False
         return done
 
-    def _occupied(self, i, j):
+    def _occupied_by_grid(self, i, j):
         if self.grid[i, j] == 1:
             return True
+        return False
+
+    def _occupied_by_agent(self, cur_id, i, j):
         for aid in range(self.agent_num):
+            if aid == cur_id:
+                pass
             if np.array_equal(self.agents[aid], [i, j]):
                 self.collide = True
                 return True
@@ -99,13 +104,13 @@ class GridWorldEnv(gym.Env):
         assert (0 <= i <= self.height - 1) and (0 <= j <= self.width - 1), \
             'Invalid indices'
 
-        if (i > 0) and not self._occupied(i - 1, j):
+        if (i > 0) and not self._occupied_by_grid(i - 1, j):
             available_actions.add(self.actions.down)
-        if (i < self.height - 1) and not self._occupied(i + 1, j):
+        if (i < self.height - 1) and not self._occupied_by_grid(i + 1, j):
             available_actions.add(self.actions.up)
-        if (j > 0) and not self._occupied(i, j - 1):
+        if (j > 0) and not self._occupied_by_grid(i, j - 1):
             available_actions.add(self.actions.left)
-        if (j < self.width - 1) and not self._occupied(i, j + 1):
+        if (j < self.width - 1) and not self._occupied_by_grid(i, j + 1):
             available_actions.add(self.actions.right)
 
         return available_actions
@@ -113,6 +118,7 @@ class GridWorldEnv(gym.Env):
     def _transition(self, actions):
         self.agents_pre = self.agents.copy()
         for aid in random.sample(range(self.agent_num), self.agent_num):
+        # for aid in range(self.agent_num):
             action = actions[aid]
             if torch.is_tensor(action):
                 action = action.item()
@@ -121,13 +127,15 @@ class GridWorldEnv(gym.Env):
             else:
                 i, j = self.agents[aid]
                 if action == self.actions.up:
-                    self.agents[aid] = [i + 1, j]
+                    i += 1
                 if action == self.actions.down:
-                    self.agents[aid] = [i - 1, j]
+                    i -= 1
                 if action == self.actions.left:
-                    self.agents[aid] = [i, j - 1]
+                    j -= 1
                 if action == self.actions.right:
-                    self.agents[aid] = [i, j + 1]
+                    j += 1
+                if not self._occupied_by_agent(aid, i, j):
+                    self.agents[aid] = [i, j]
 
     def step(self, actions):
         if not isinstance(actions, list):
@@ -146,12 +154,16 @@ class GridWorldEnv(gym.Env):
 
     def _reward(self):
         rewards = [0] * self.agent_num
+        reach_goal = [False] * self.agent_num
         for aid in range(self.agent_num):
             i, j = self.agents[aid]
             if (self.goals[aid][0] == i) and (self.goals[aid][1] == j):
-                rewards[aid] = 1 - 0.9 * (self.step_count / self.max_steps)
+                reach_goal[aid] = True
             else:
                 rewards[aid] = -10 if self.collide else self.reward_mat[i, j]
+        if np.all(reach_goal):
+            for aid in range(self.agent_num):
+                rewards[aid] = 1 - 0.9 * (self.step_count / self.max_steps)
         return rewards
 
         # version 1: discrete reward only at goal location
@@ -189,7 +201,7 @@ class GridWorldEnv(gym.Env):
 
         if not self.visualize:
             self.update_img()
-        self.window.show_img(self.cur_img)
+        self.window.show_img(np.flip(self.cur_img, axis=0))
 
         return self.cur_img
 

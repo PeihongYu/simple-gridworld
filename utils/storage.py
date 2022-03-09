@@ -4,7 +4,6 @@ import torch
 import logging
 import sys
 
-import lambda_helper
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

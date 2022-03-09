@@ -24,7 +24,7 @@ class PPO(AgentBase):
     def select_action(self, state):
         actions = [0] * self.agent_num
         for aid in range(self.agent_num):
-            dist, value = self.acmodels[aid](state[aid])
+            dist, value = self.acmodels[aid](state.flatten())
             action = dist.sample()
             actions[aid] = action
         return actions
@@ -45,7 +45,7 @@ class PPO(AgentBase):
                 action = self.select_action(state["vec"])
                 next_state, reward, done, _ = self.env.step(action)
                 if self.use_prior:
-                    shadow_reward = self.compute_shadow_r(state, action)
+                    shadow_reward = self.compute_shadow_r(state["vec"], action)
                     reward = reward + shadow_reward
                 ep_returns += reward
                 buffer.append(state["vec"], action, reward, done)
@@ -53,18 +53,17 @@ class PPO(AgentBase):
                 steps += 1
                 ep_steps += 1
             if tb_writer:
-                tb_writer.add_info(ep_steps, ep_returns)
+                tb_writer.add_info(ep_steps, ep_returns, self.pweight)
         return steps
 
     def update_parameters(self, buffer):
         buf_len = buffer.now_len
         with torch.no_grad():
             buf_state, buf_reward, buf_action, buf_done = buffer.sample_all()
-            state_dim = self.env.state_space.shape[0]
             buf_value = torch.zeros(buf_action.shape, device=self.device)
             buf_logprob = torch.zeros(buf_action.shape, device=self.device)
             for aid in range(self.agent_num):
-                dist, value = self.acmodels[aid](buf_state[:, state_dim * aid: state_dim * aid + state_dim])
+                dist, value = self.acmodels[aid](buf_state)
                 logprob = dist.log_prob(buf_action[:, aid])
                 buf_value[:, aid] = value
                 buf_logprob[:, aid] = logprob
@@ -85,7 +84,7 @@ class PPO(AgentBase):
             sb_advantage = buf_advantage[indices]
 
             for aid in range(self.agent_num):
-                dist, value = self.acmodels[aid](sb_state[:, state_dim * aid: state_dim * aid + state_dim])
+                dist, value = self.acmodels[aid](sb_state)
                 entropy = dist.entropy().mean()
 
                 ratio = torch.exp(dist.log_prob(sb_action[:, aid]) - sb_logprob[:, aid])

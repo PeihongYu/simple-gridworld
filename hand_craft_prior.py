@@ -14,6 +14,7 @@ class Actions(IntEnum):
 
 # upperLeftSquare_1a
 # centerSquare_1a
+# centerSquare_1a_flip
 # centerSquare_2a
 # empty_1a
 env_name = "centerSquare_1a"
@@ -48,7 +49,7 @@ if env_name == "centerSquare_1a":
     for i in range(height-1):
         sa_lambdas[Actions.up, i, j] = state_lambdas[i, j]
     i = j = 9
-    sa_lambdas[:, i, j] = state_lambdas[i, j] * 0.25
+    sa_lambdas[0:4, i, j] = state_lambdas[i, j] * 0.25
 
 if env_name == "centerSquare_1a_flip":
     num_visit = (reward_mat == 0).sum()
@@ -60,8 +61,8 @@ if env_name == "centerSquare_1a_flip":
     for i in range(1, height - 1):
         sa_lambdas[Actions.down, i, j] = state_lambdas[i, j]
     i = j = 9
-    sa_lambdas[Actions.right, i, j] = state_lambdas[i, j] * 0.5
-    sa_lambdas[Actions.up, i, j] = state_lambdas[i, j] * 0.5
+    sa_lambdas[Actions.left, i, j] = state_lambdas[i, j] * 0.5
+    sa_lambdas[Actions.down, i, j] = state_lambdas[i, j] * 0.5
     i = 0
     for j in range(1, width):
         sa_lambdas[Actions.left, i, j] = state_lambdas[i, j]
@@ -69,7 +70,7 @@ if env_name == "centerSquare_1a_flip":
     for i in range(1, height):
         sa_lambdas[Actions.down, i, j] = state_lambdas[i, j]
     i = j = 0
-    sa_lambdas[:, i, j] = state_lambdas[i, j] * 0.25
+    sa_lambdas[0:4, i, j] = state_lambdas[i, j] * 0.25
 
 print(state_lambdas.sum())
 print(sa_lambdas.sum())

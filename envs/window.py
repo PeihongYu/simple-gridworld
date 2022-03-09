@@ -54,7 +54,7 @@ class Window:
 
         # Let matplotlib process UI events
         # This is needed for interactive mode to work properly
-        plt.pause(0.001)
+        plt.pause(0.05)    #0.001
 
     def set_caption(self, text):
         """

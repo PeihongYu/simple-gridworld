@@ -6,7 +6,7 @@ import tensorboardX
 from envs.gridworld import GridWorld
 from algos.model import actorModel
 from lambda_helper import calculate_lambda
-from penv import ParallelEnv
+from utils.penv import ParallelEnv
 import time
 import matplotlib.pyplot as plt
 

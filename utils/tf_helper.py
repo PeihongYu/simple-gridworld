@@ -11,6 +11,7 @@ class tb_writer:
         self.csv_file, self.csv_logger = utils.get_csv_logger(self.model_dir, mode="a")
         self.agent_num = agent_num
         self.use_prior = use_prior
+        self.pweight = 0
         self.now_len = 0
         self.max_len = 100
         self.is_full = False
@@ -27,9 +28,10 @@ class tb_writer:
         else:
             self.csv_file.flush()
 
-    def add_info(self, frames, returns):
+    def add_info(self, frames, returns, pweight=0):
         self.frames[self.now_len] = frames
         self.returns[self.now_len] = returns
+        self.pweight = pweight
         self.now_len += 1
         self.ep_num += 1
         self.frames_num += frames
@@ -76,5 +78,7 @@ class tb_writer:
                 self.tb_writer.add_scalar("shadow_returns_a" + str(aid), mean_returns[self.agent_num + aid], idx)
                 self.tb_writer.add_scalar("ep_shadow_returns_a" + str(aid), mean_returns[self.agent_num + aid],
                                           self.ep_num)
+        self.tb_writer.add_scalar("pweight", self.pweight, idx)
+        self.tb_writer.add_scalar("ep_pweight", self.pweight, self.ep_num)
 
         return mean_returns[:self.agent_num]

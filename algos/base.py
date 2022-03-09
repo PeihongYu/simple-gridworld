@@ -9,7 +9,7 @@ class ExpBuffer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.max_len = max_len
         self.now_len = 0
-        self.state = torch.empty((max_len, state_dim * agent_num), dtype=torch.float32, device=self.device)
+        self.state = torch.empty((max_len, state_dim), dtype=torch.float32, device=self.device)
         self.action = torch.empty((max_len, agent_num), dtype=torch.float32, device=self.device)
         self.reward = torch.empty((max_len, agent_num + agent_num * use_prior), dtype=torch.float32, device=self.device)
         self.done = torch.empty((max_len, 1), dtype=torch.float32, device=self.device)
@@ -42,7 +42,7 @@ class AgentBase:
         self.agent_num = env.agent_num
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.lr = 0.0001  # the learning rate for optimizers
-        self.gamma = 1  #0.99  # the discount factor for future rewards
+        self.gamma = 0.99  #0.99  # the discount factor for future rewards
         self.lambda_gae_adv = 0.98  # could be 0.95 ~ 0.99, GAE (Generalized Advantage Estimation. ICLR.2016.)
 
         self.acmodels = []
@@ -50,10 +50,11 @@ class AgentBase:
 
         if prior is None:
             self.use_prior = False
+            self.pweight = 0
         else:
             self.use_prior = True
             self.prior = prior
-            self.pweight = 0.995
+            self.pweight = 1
             self.pdecay = 0.995
 
         if self.use_prior:
@@ -75,8 +76,8 @@ class AgentBase:
 
     def compute_shadow_r(self, state, action):
         shadow_r = [0] * self.agent_num
-        cur_probs = self.occupancy_measures.get_prob(state["vec"])
-        prior_probs = self.get_prior_prob(state["vec"], action)
+        cur_probs = self.occupancy_measures.get_prob(state)
+        prior_probs = self.get_prior_prob(state, action)
         for aid in range(self.agent_num):
             cur_prob = cur_probs[aid] + 1e-12
             prior_prob = prior_probs[aid] + 1e-12

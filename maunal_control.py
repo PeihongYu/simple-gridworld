@@ -65,7 +65,7 @@ def key_handler(event):
 # centerSquare_1a
 # centerSquare_2a
 # empty_1a
-env_name = "empty_1a"
+env_name = "centerSquare_2a"
 json_file = "./envfiles/" + env_name + ".json"
 
 env = GridWorldEnv(json_file, True)

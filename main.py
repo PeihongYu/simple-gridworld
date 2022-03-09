@@ -10,13 +10,13 @@ import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-target_frames = 10000000
+target_frames = 4000000
 
 # upperLeftSquare_1a
 # centerSquare_1a
 # centerSquare_2a
 # empty_1a
-env_name = "centerSquare_2a"
+env_name = "centerSquare_4a"
 json_file = "./envfiles/" + env_name + ".json"
 env = GridWorldEnv(json_file)
 state_dim = env.state_space.shape[0]
@@ -24,11 +24,12 @@ action_dim = env.action_space.n
 agent_num = env.agent_num
 
 use_prior = True
+pweigt = 0.998
 if use_prior:
-    prior_names = ["centerSquare_1a", "centerSquare_1a_flip"]
+    # prior_names = ["centerSquare_1a", "centerSquare_1a_flip"]
     prior = []
     for aid in range(agent_num):
-        prior.append(np.load("./envfiles/" + prior_names[aid] + "_prior.npy"))
+        prior.append(np.load("./envfiles/" + env_name + "_prior" + str(aid) + ".npy"))
 else:
     prior = None
 
@@ -36,7 +37,7 @@ algorithm = "PPO"
 
 model_dir = "outputs/" + env_name + "_" + algorithm
 if use_prior:
-    model_dir += "_wprior"
+    model_dir += "_wprior" + str(pweigt)
 
 if algorithm == "REINFORCE":
     batch_size = 1
@@ -48,6 +49,9 @@ elif algorithm == "PPO":
     max_len += env.max_steps
 else:
     raise ValueError("Incorrect algorithm name: {}".format(algorithm))
+
+if use_prior:
+    algo.pdecay = pweigt
 
 buffer = ExpBuffer(max_len, state_dim, agent_num, use_prior)
 tb_writer = utils.tb_writer(model_dir, agent_num, use_prior)

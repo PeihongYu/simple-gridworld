@@ -1,0 +1,42 @@
+{
+    "agent_num": 4,
+    "starts": [
+        [
+            0,
+            0
+        ],
+        [
+            0,
+            9
+        ],
+        [
+            9,
+            9
+        ],
+        [
+            9,
+            0
+        ]
+    ],
+    "goals": [
+        [
+            9,
+            9
+        ],
+        [
+            9,
+            0
+        ],
+        [
+            0,
+            0
+        ],
+        [
+            0,
+            9
+        ]
+    ],
+    "grid_file": "./envfiles/centerSquare_grid.npy",
+    "reward_file": "./envfiles/centerSquare_reward.npy",
+    "img_file": "./envfiles/centerSquare_img.npy"
+}

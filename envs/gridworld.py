@@ -163,7 +163,7 @@ class GridWorldEnv(gym.Env):
                 rewards[aid] = -10 if self.collide else self.reward_mat[i, j]
         if np.all(reach_goal):
             for aid in range(self.agent_num):
-                rewards[aid] = 1 - 0.9 * (self.step_count / self.max_steps)
+                rewards[aid] = 10 - 9 * (self.step_count / self.max_steps)
         return rewards
 
         # version 1: discrete reward only at goal location

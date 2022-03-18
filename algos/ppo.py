@@ -15,6 +15,7 @@ class PPO(AgentBase):
         self.clip_eps = 0.2  # ratio.clamp(1 - clip, 1 + clip)
         self.lambda_entropy = 0.01  # could be 0.02
         self.value_loss_coef = 0.5
+        self.max_grad_norm = 0.5
 
         for aid in range(env.agent_num):
             self.acmodels.append(ACModel(env.state_space, env.action_space))
@@ -29,9 +30,9 @@ class PPO(AgentBase):
             actions[aid] = action
         return actions
 
-    def collect_experiences(self, buffer, tb_writer=None):
+    def collect_experiences(self, buffer, tb_writer=None, N=100):
         if self.use_prior:
-            self.compute_lambda()
+            self.compute_lambda(N=N)
 
         buffer.empty_buffer_before_explore()
         steps = 0
@@ -56,7 +57,7 @@ class PPO(AgentBase):
                 tb_writer.add_info(ep_steps, ep_returns, self.pweight)
         return steps
 
-    def update_parameters(self, buffer):
+    def update_parameters(self, buffer, tb_writer=None):
         buf_len = buffer.now_len
         with torch.no_grad():
             buf_state, buf_reward, buf_action, buf_done = buffer.sample_all()
@@ -100,7 +101,16 @@ class PPO(AgentBase):
                 loss = policy_loss - self.lambda_entropy * entropy + self.value_loss_coef * value_loss
                 self.optimizers[aid].zero_grad()
                 loss.backward()
+                grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
+                # torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
+                # grad_norm2 = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
+                # print("agent ", aid, ": grad_norm before and after clipping ...", grad_norm, grad_norm2)
+                if grad_norm < 1:
+                    for params in self.acmodels[aid].parameters():
+                        params.grad += torch.randn(params.grad.shape, device=self.device)
                 self.optimizers[aid].step()
+                if tb_writer:
+                    tb_writer.add_grad_info(aid, policy_loss.item(), value_loss.item(), grad_norm)
 
     def compute_reward_adv(self, buf_len, buf_reward, buf_done, buf_value) -> (torch.Tensor, torch.Tensor):
         buf_r_sum = torch.empty(buf_reward.shape, dtype=torch.float32, device=self.device)  # reward sum

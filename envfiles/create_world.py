@@ -277,10 +277,52 @@ def create_setup_4():
     plt.close()
 
 
+def create_setup_5():
+    # single agent: 10x10 grid map
+    # center 6x6 grids have -2 as reward
+    file_name = "centerSquare6x6"
+    env_name = "./envfiles/" + file_name
+
+    width = 10
+    height = 10
+    agent_poses = [[0, 0], [0, width - 1], [height - 1, width - 1], [height - 1, 0]]
+    goal_poses = [[height - 1, width - 1], [height - 1, 0], [0, 0], [0, width - 1]]
+    grid = np.zeros([height, width])
+    reward = np.zeros([height, width])
+
+    for i in range(height):
+        for j in range(width):
+            if 1 < i < 8 and 1 < j < 8:
+                reward[i, j] = -2
+
+    img = initialize_img(grid, reward)
+
+    json_dict = {
+        "agent_num": 4,
+        "starts": agent_poses,
+        "goals": goal_poses,
+        "grid_file": env_name + "_grid.npy",
+        "reward_file": env_name + "_reward.npy",
+        "img_file": env_name + "_img.npy"
+    }
+
+    np.save(file_name + "_grid.npy", grid)
+    np.save(file_name + "_reward.npy", reward)
+    np.save(file_name + "_img.npy", img)
+
+    with open(file_name + "_4a.json", 'w') as outfile:
+        json.dump(json_dict, outfile, indent=4)
+
+    img = update_img(img, agent_poses, goal_poses)
+    plt.imshow(np.flip(img, axis=0))
+    plt.axis('off')
+    plt.savefig(file_name + "_4a.jpg")
+    plt.close()
+
 
 if __name__ == '__main__':
     # create_setup_0()
     # create_setup_1()
     # create_setup_2()
     # create_setup_3()
-    create_setup_4()
+    create_setup_5()

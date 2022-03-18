@@ -4,11 +4,12 @@ from envs.gridworld import GridWorldEnv
 
 # centerSquare_1a
 # centerSquare_1a_flip
-env_name = "centerSquare_4a"
-aid = 2
+env_name = "centerSquare_1a_flip"
+aid = 0
 json_file = "./envfiles/" + env_name + ".json"
 env = GridWorldEnv(json_file)
-prior = np.load("./envfiles/" + env_name + "_prior" + str(aid) + ".npy")
+# prior = np.load("./envfiles/" + env_name + "_prior" + str(aid) + ".npy")
+prior = np.load("./envfiles/" + env_name + "_prior.npy")
 
 state_prior = prior.sum(0)
 

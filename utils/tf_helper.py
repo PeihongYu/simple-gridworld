@@ -20,6 +20,11 @@ class tb_writer:
         self.frames = np.zeros(self.max_len)
         self.returns = np.zeros([self.max_len, agent_num * (1 + use_prior)])
 
+        self.gid = 0
+        self.grad_norm = np.zeros([self.max_len, agent_num])
+        self.policy_loss = np.zeros([self.max_len, agent_num])
+        self.value_loss = np.zeros([self.max_len, agent_num])
+
     def update_csv_logger(self, status):
         if status["episode"] == 0:
             self.csv_file, self.csv_logger = utils.get_csv_logger(self.model_dir, mode="w")
@@ -59,6 +64,13 @@ class tb_writer:
             self.now_len = l
             self.is_full = True
 
+    def add_grad_info(self, aid, ploss, vloss, grad_norm):
+        self.policy_loss[self.gid, aid] = ploss
+        self.value_loss[self.gid, aid] = vloss
+        self.grad_norm[self.gid, aid] = grad_norm
+        if aid == self.agent_num - 1:
+            self.gid += 1
+
     def log(self, idx):
         if self.is_full:
             mean_frames = self.frames.mean()
@@ -66,6 +78,11 @@ class tb_writer:
         else:
             mean_frames = self.frames[:self.now_len].mean()
             mean_returns = self.returns[:self.now_len].mean(axis=0)
+
+        policy_loss_mean = self.policy_loss[:self.gid].mean(axis=0)
+        value_loss_mean = self.value_loss[:self.gid].mean(axis=0)
+        grad_norm_mean = self.grad_norm[:self.gid].mean(axis=0)
+        self.gid = 0
 
         print("episode ", self.ep_num, " average frames: ", mean_frames, " average returns: ", mean_returns)
 
@@ -78,6 +95,11 @@ class tb_writer:
                 self.tb_writer.add_scalar("shadow_returns_a" + str(aid), mean_returns[self.agent_num + aid], idx)
                 self.tb_writer.add_scalar("ep_shadow_returns_a" + str(aid), mean_returns[self.agent_num + aid],
                                           self.ep_num)
+            self.tb_writer.add_scalar("policy_loss_a" + str(aid), policy_loss_mean[aid], idx)
+            self.tb_writer.add_scalar("value_loss_a" + str(aid), value_loss_mean[aid], idx)
+            self.tb_writer.add_scalar("grad_norm_a" + str(aid), grad_norm_mean[aid], idx)
+
+
         self.tb_writer.add_scalar("pweight", self.pweight, idx)
         self.tb_writer.add_scalar("ep_pweight", self.pweight, self.ep_num)
 

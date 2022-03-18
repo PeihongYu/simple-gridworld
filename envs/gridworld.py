@@ -199,9 +199,9 @@ class GridWorldEnv(gym.Env):
             self.window = window.Window('Grid World')
             self.window.show(block=False)
 
-        if not self.visualize:
+        if self.visualize:
             self.update_img()
         self.window.show_img(np.flip(self.cur_img, axis=0))
 
-        return self.cur_img
+        return np.flip(self.cur_img, axis=0)
 

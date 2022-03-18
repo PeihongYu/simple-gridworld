@@ -16,7 +16,7 @@ target_frames = 4000000
 # centerSquare_1a
 # centerSquare_2a
 # empty_1a
-env_name = "centerSquare_4a"
+env_name = "centerSquare6x6_3a"
 json_file = "./envfiles/" + env_name + ".json"
 env = GridWorldEnv(json_file)
 state_dim = env.state_space.shape[0]
@@ -24,20 +24,23 @@ action_dim = env.action_space.n
 agent_num = env.agent_num
 
 use_prior = True
-pweigt = 0.998
+pweigt = 0.995
 if use_prior:
     # prior_names = ["centerSquare_1a", "centerSquare_1a_flip"]
     prior = []
     for aid in range(agent_num):
-        prior.append(np.load("./envfiles/" + env_name + "_prior" + str(aid) + ".npy"))
+        prior.append(np.load("./envfiles/centerSquare_4a_prior" + str(aid) + ".npy"))
+        # prior.append(np.load("./envfiles/" + prior_names[aid] + "_prior.npy"))
 else:
     prior = None
 
 algorithm = "PPO"
+N = 1000
 
 model_dir = "outputs/" + env_name + "_" + algorithm
 if use_prior:
     model_dir += "_wprior" + str(pweigt)
+    model_dir += "_N" + str(N)
 
 if algorithm == "REINFORCE":
     batch_size = 1
@@ -74,7 +77,7 @@ except OSError:
 
 while num_frames < target_frames:
     frames = algo.collect_experiences(buffer, tb_writer)
-    algo.update_parameters(buffer)
+    algo.update_parameters(buffer, tb_writer)
     num_frames += frames
     avg_returns = tb_writer.log(num_frames)
 

@@ -7,7 +7,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def load_models(model_dir, env):
     acmodels = []
-    status = torch.load(model_dir + "/last_status.pt", map_location=device)
+    status = torch.load(model_dir + "/best_status.pt", map_location=device)
     if "REINFORCE" in model_dir:
         for aid in range(env.agent_num):
             acmodels.append(ActorModel(env.state_space, env.action_space))

@@ -24,9 +24,9 @@ class REINFORCE(AgentBase):
             actions[aid] = action
         return actions
 
-    def collect_experiences(self, buffer, tb_writer=None):
+    def collect_experiences(self, buffer, tb_writer=None, N=100):
         if self.use_prior:
-            self.compute_lambda()
+            self.compute_lambda(N=N)
 
         buffer.empty_buffer_before_explore()
         episodes = 0

@@ -57,6 +57,8 @@ class AgentBase:
             self.pweight = 1
             self.pdecay = 0.995
 
+        self.use_expert = False
+
         if self.use_prior:
             self.occupancy_measures = StateOccupancyMeasure(env.grid.shape, env.agent_num)
 

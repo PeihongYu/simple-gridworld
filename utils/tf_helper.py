@@ -5,18 +5,21 @@ np.set_printoptions(precision=2)
 
 
 class tb_writer:
-    def __init__(self, model_dir, agent_num, use_prior):
+    def __init__(self, model_dir, agent_num, use_prior, use_expert):
         self.model_dir = model_dir
         self.tb_writer = tensorboardX.SummaryWriter(model_dir)
         self.csv_file, self.csv_logger = utils.get_csv_logger(self.model_dir, mode="a")
         self.agent_num = agent_num
         self.use_prior = use_prior
+        self.use_expert = use_expert
         self.pweight = 0
         self.now_len = 0
-        self.max_len = 100
+        self.max_len = 4096
         self.is_full = False
+        self.avg_range = 100
         self.ep_num = 0
         self.frames_num = 0
+        self.ep_idxes = np.zeros(self.max_len)
         self.frames = np.zeros(self.max_len)
         self.returns = np.zeros([self.max_len, agent_num * (1 + use_prior)])
 
@@ -25,15 +28,16 @@ class tb_writer:
         self.policy_loss = np.zeros([self.max_len, agent_num])
         self.value_loss = np.zeros([self.max_len, agent_num])
 
-    def update_csv_logger(self, status):
-        if status["episode"] == 0:
-            self.csv_file, self.csv_logger = utils.get_csv_logger(self.model_dir, mode="w")
-            header = ""
-            self.csv_logger.writerow(header)
-        else:
-            self.csv_file.flush()
+    def empty_buffer(self):
+        self.now_len = 0
+
+    def log_csv(self):
+        info = np.column_stack((self.ep_idxes, self.frames, self.returns))
+        self.csv_logger.writerows(info[:self.now_len].tolist())
+        self.csv_file.flush()
 
     def add_info(self, frames, returns, pweight=0):
+        self.ep_idxes[self.now_len] = self.ep_num
         self.frames[self.now_len] = frames
         self.returns[self.now_len] = returns
         self.pweight = pweight
@@ -72,9 +76,13 @@ class tb_writer:
             self.gid += 1
 
     def log(self, idx):
-        if self.is_full:
-            mean_frames = self.frames.mean()
-            mean_returns = self.returns.mean(axis=0)
+        if self.now_len > self.avg_range:
+            mean_frames = self.frames[self.now_len-self.avg_range:self.now_len].mean()
+            mean_returns = self.returns[self.now_len-self.avg_range:self.now_len].mean(axis=0)
+        elif self.is_full and self.now_len < self.avg_range:
+            back_len = self.avg_range - self.now_len
+            mean_frames = (self.frames[:self.now_len].sum() + self.frames[-back_len:].sum()) / self.avg_range
+            mean_returns = (self.returns[:self.now_len].sum(axis=0) + self.returns[-back_len:].sum(axis=0)) / self.avg_range
         else:
             mean_frames = self.frames[:self.now_len].mean()
             mean_returns = self.returns[:self.now_len].mean(axis=0)
@@ -98,7 +106,6 @@ class tb_writer:
             self.tb_writer.add_scalar("policy_loss_a" + str(aid), policy_loss_mean[aid], idx)
             self.tb_writer.add_scalar("value_loss_a" + str(aid), value_loss_mean[aid], idx)
             self.tb_writer.add_scalar("grad_norm_a" + str(aid), grad_norm_mean[aid], idx)
-
 
         self.tb_writer.add_scalar("pweight", self.pweight, idx)
         self.tb_writer.add_scalar("ep_pweight", self.pweight, self.ep_num)

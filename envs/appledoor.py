@@ -1,5 +1,4 @@
 import numpy as np
-import os
 import torch
 import json
 import random
@@ -10,10 +9,9 @@ from envfiles.create_world import create_tile, colors
 
 # left, right, up, down
 ACTIONS = [(0, -1), (0, 1), (1, 0), (-1, 0)]
-ACTIONS_NAME = ["left", "right", "up", "down", "stay"]
 
 
-class GridWorldEnv(gym.Env):
+class AppleDoorEnv(gym.Env):
 
     # Enumeration of possible actions
     class Actions(IntEnum):
@@ -23,28 +21,24 @@ class GridWorldEnv(gym.Env):
         down = 3
         stay = 4
 
-    def __init__(self, env_name, dense_reward=False, visualize=False):
-        self.env_name = env_name
-        envfile_dir = "./envfiles/" + env_name.split("_")[0] + "/"
-        if "envfiles" in os.getcwd():
-            envfile_dir = env_name.split("_")[0] + "/"
-        json_file = envfile_dir + env_name + ".json"
+    def __init__(self, json_file, visualize=False):
+
         with open(json_file) as infile:
             args = json.load(infile)
-        self.grid = np.load(envfile_dir + args["grid_file"])
-        self.lava = np.load(envfile_dir + args["lava_file"])
-        self.img = np.load(envfile_dir + args["img_file"])
+        self.grid = np.load(args["grid_file"])
+        self.reward_mat = np.load(args["reward_file"])
+        self.img = np.load(args["img_file"])
         self.height, self.width = self.grid.shape
 
         self.agent_num = args["agent_num"]
         self.starts = np.array(args["starts"])
         self.goals = np.array(args["goals"])
+        self.door = np.array_equal(args["door"])
         self.agents = self.starts.copy()
         self.agents_pre = self.starts.copy()
         self.collide = False
-        self.step_in_lava = False
 
-        self.actions = GridWorldEnv.Actions
+        self.actions = AppleDoorEnv.Actions
 
         self.state_space = gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8')
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
@@ -53,7 +47,6 @@ class GridWorldEnv(gym.Env):
         self.max_steps = 100
         self.step_count = 0
 
-        self.dense_reward = dense_reward
         self.visualize = visualize
         self.initialize_img()
         self.cur_img = None
@@ -84,7 +77,7 @@ class GridWorldEnv(gym.Env):
 
     @property
     def done(self):
-        if self.step_in_lava or np.array_equal(self.agents, self.goals) or (self.step_count >= self.max_steps):
+        if np.array_equal(self.agents, self.goals) or (self.step_count >= self.max_steps):
             done = True
         else:
             done = False
@@ -95,16 +88,11 @@ class GridWorldEnv(gym.Env):
             return True
         return False
 
-    def _occupied_by_lava(self, i, j):
-        if self.lava[i, j] == 1:
-            return True
-        return False
-
     def _occupied_by_agent(self, cur_id, i, j):
         for aid in range(self.agent_num):
             if aid == cur_id:
                 pass
-            elif np.array_equal(self.agents[aid], [i, j]):
+            if np.array_equal(self.agents[aid], [i, j]):
                 self.collide = True
                 return True
         return False
@@ -154,7 +142,6 @@ class GridWorldEnv(gym.Env):
         if not isinstance(actions, list):
             actions = [actions]
 
-        pre_state = self.agents.copy()
         self.step_count += 1
         self._transition(actions)
 
@@ -162,21 +149,13 @@ class GridWorldEnv(gym.Env):
             self.update_img()
 
         reward = self._reward()
+        self.collide = False
+        done = self.done or -2 in reward
+        if -2 in reward:
+            for i in range(len(reward)):
+                reward[i] = 0
 
-        # if self.collide:
-        #     print("collide: ", pre_state.flatten(), " --> ", self.agents.flatten(), "  actions: ", [ACTIONS_NAME[i] for i in actions])
-
-        done = self.done
-
-        info = []
-        if self.collide:
-            info += "collide"
-            self.collide = False
-        if self.step_in_lava:
-            info = "in lava"
-            self.step_in_lava = False
-
-        return self.state, reward, done, info
+        return self.state, reward, done, {}
 
     def _reward(self):
         rewards = [0] * self.agent_num
@@ -185,14 +164,8 @@ class GridWorldEnv(gym.Env):
             i, j = self.agents[aid]
             if (self.goals[aid][0] == i) and (self.goals[aid][1] == j):
                 reach_goal[aid] = True
-            if self.collide:
-                rewards[aid] = -1
-            elif self._occupied_by_lava(i, j):
-                rewards[aid] = 0
-                self.step_in_lava = True
             else:
-                rewards[aid] = -abs(self.goals[aid] - self.agents[aid]).sum() / 100 if self.dense_reward else 0
-                #self.lava[i, j] * -2
+                rewards[aid] = -10 if self.collide else self.reward_mat[i, j]
         if np.all(reach_goal):
             for aid in range(self.agent_num):
                 rewards[aid] = 10 - 9 * (self.step_count / self.max_steps)

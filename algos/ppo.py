@@ -15,7 +15,7 @@ class PPO(AgentBase):
         self.clip_eps = 0.2  # ratio.clamp(1 - clip, 1 + clip)
         self.lambda_entropy = 0.01  # could be 0.02
         self.value_loss_coef = 0.5
-        self.max_grad_norm = 0.5
+        self.max_grad_norm = 1
 
         for aid in range(env.agent_num):
             self.acmodels.append(ACModel(env.state_space, env.action_space))
@@ -57,7 +57,7 @@ class PPO(AgentBase):
                 tb_writer.add_info(ep_steps, ep_returns, self.pweight)
         return steps
 
-    def update_parameters(self, buffer, tb_writer=None):
+    def update_parameters(self, buffer, tb_writer=None, clip_grad=False, add_noise=False):
         buf_len = buffer.now_len
         with torch.no_grad():
             buf_state, buf_reward, buf_action, buf_done = buffer.sample_all()
@@ -102,10 +102,11 @@ class PPO(AgentBase):
                 self.optimizers[aid].zero_grad()
                 loss.backward()
                 grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
-                # torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
+                if clip_grad:
+                    torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
                 # grad_norm2 = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
                 # print("agent ", aid, ": grad_norm before and after clipping ...", grad_norm, grad_norm2)
-                if grad_norm < 1:
+                if add_noise and grad_norm < 1:
                     for params in self.acmodels[aid].parameters():
                         params.grad += torch.randn(params.grad.shape, device=self.device)
                 self.optimizers[aid].step()
@@ -118,7 +119,7 @@ class PPO(AgentBase):
         for i in reversed(range(buf_len)):
             buf_r_sum[i] = buf_reward[i] + self.gamma * (1 - buf_done[i]) * pre_r_sum
             pre_r_sum = buf_r_sum[i]
-        if self.use_prior:
+        if self.use_prior or self.use_expert:
             buf_r_sum = (1 - self.pweight) * buf_r_sum[:, :self.agent_num] + self.pweight * buf_r_sum[:, self.agent_num:]
             self.pweight *= self.pdecay
         buf_advantage = buf_r_sum - ((1 - buf_done) * buf_value)

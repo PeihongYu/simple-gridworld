@@ -93,3 +93,22 @@ class ACModel(nn.Module):
         action = dist.sample()
         log_prob_action = dist.log_prob(action)
         return action, log_prob_action
+
+
+class Discriminator(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.model = nn.Sequential(
+            nn.Linear(state_dim + action_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, state_action):
+        reward = self.model(to_tensor(state_action, self.device))
+        return reward

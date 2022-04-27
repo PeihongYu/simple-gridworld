@@ -65,10 +65,9 @@ def key_handler(event):
 # centerSquare_1a
 # centerSquare_2a
 # empty_1a
-env_name = "centerSquare_3a"
-json_file = "./envfiles/" + env_name + ".json"
+env_name = "centerSquare6x6_1a"
 
-env = GridWorldEnv(json_file, True)
+env = GridWorldEnv(env_name, dense_reward=True, visualize=True)
 actions = []
 action_num = env.agent_num
 

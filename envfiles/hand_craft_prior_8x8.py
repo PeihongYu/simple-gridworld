@@ -1,9 +1,12 @@
 import numpy as np
 import json
 from enum import IntEnum
+import matplotlib.pyplot as plt
 from envs.gridworld import GridWorldEnv
+from envfiles.funcs.utils import *
+from envfiles.show_crafted_policy import visualize_policy
 
-np.set_printoptions(precision=5)
+np.set_printoptions(precision=3)
 
 
 class Actions(IntEnum):
@@ -14,19 +17,14 @@ class Actions(IntEnum):
     stay = 4
 
 
-# upperLeftSquare_1a
-# centerSquare_1a
-# centerSquare_1a_flip
-# centerSquare_2a
-# empty_1a
-env_name = "centerSquare_4a"
-json_file = "./envfiles/" + env_name + ".json"
-env = GridWorldEnv(json_file)
+env_name = "centerSquare8x8"
+dir_name = generate_dir(env_name)
+env = GridWorldEnv(env_name + "_4a")
 
 state_lambdas = np.zeros(env.grid.shape)
 
-num_visit = (env.reward_mat == 0).sum()
-state_lambdas[env.reward_mat == 0] = 1 / num_visit
+num_visit = (env.lava == 0).sum()
+state_lambdas[env.lava == 0] = 1 / num_visit
 
 actions = [[Actions.right, Actions.up],
            [Actions.left, Actions.up],
@@ -57,4 +55,14 @@ for aid in range(4):
     print(sa_lambdas.sum())
     print(sa_lambdas.sum(0))
 
-    np.save("./envfiles/" + env_name + "_prior" + str(aid) + ".npy", sa_lambdas)
+    np.save(dir_name + "_prior" + str(aid) + ".npy", sa_lambdas)
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xticks(np.arange(0, 10+1, 1))
+    ax.set_yticks(np.arange(0, 10+1, 1))
+    ax.set_aspect('equal')
+    visualize_policy(env.agents[aid], env.goals[aid], sa_lambdas)
+
+    plt.savefig(dir_name + "_policy" + str(aid) + '.jpg', bbox_inches='tight')
+    plt.close(fig)

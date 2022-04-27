@@ -53,7 +53,7 @@ class REINFORCE(AgentBase):
             episodes += 1
         return steps
 
-    def update_parameters(self, buffer):
+    def update_parameters(self, buffer, tb_writer=None, clip_grad=False, add_noise=False):
         buf_len = buffer.now_len
         with torch.no_grad():
             buf_state, buf_reward, buf_action, buf_done = buffer.sample_all()

@@ -7,7 +7,9 @@ from algos.model import ACModel
 class PPO(AgentBase):
     def __init__(self, env, batch_size=512, target_steps=2048, repeat_times=4, prior=None):
         super().__init__(env, prior)
-        self.share_reward = True
+        self.share_reward = False
+        self.param_share = True
+
         self.batch_size = batch_size        # how many frames for each update
         self.repeat_times = repeat_times    # how many times to reuse the memory
         self.target_steps = target_steps
@@ -112,6 +114,14 @@ class PPO(AgentBase):
                 self.optimizers[aid].step()
                 if tb_writer:
                     tb_writer.add_grad_info(aid, policy_loss.item(), value_loss.item(), grad_norm)
+
+        if self.param_share and self.agent_num > 1:
+            state_dict_all = [self.acmodels[aid].critic.state_dict() for aid in range(self.agent_num)]
+            avg_sd = state_dict_all[0].copy()
+            for key in state_dict_all[0]:
+                avg_sd[key] = torch.mean(torch.stack([state_dict_all[aid][key] for aid in range(self.agent_num)]), dim=0)
+            for aid in range(self.agent_num):
+                self.acmodels[aid].critic.load_state_dict(avg_sd)
 
     def compute_reward_adv(self, buf_len, buf_reward, buf_done, buf_value) -> (torch.Tensor, torch.Tensor):
         buf_r_sum = torch.empty(buf_reward.shape, dtype=torch.float32, device=self.device)  # reward sum

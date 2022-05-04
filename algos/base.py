@@ -1,18 +1,23 @@
 import numpy as np
 import torch
+import utils
 
 from algos.occupancy_measure import StateOccupancyMeasure
 
 
 class ExpBuffer:
-    def __init__(self, max_len, state_dim, agent_num, use_prior=False):
+    def __init__(self, max_len, state_dim, agent_num, args):
+        self.use_prior = args.use_prior
+        self.use_state_norm = args.use_state_norm
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.max_len = max_len
         self.now_len = 0
         self.state = torch.empty((max_len, state_dim), dtype=torch.float32, device=self.device)
         self.action = torch.empty((max_len, agent_num), dtype=torch.float32, device=self.device)
-        self.reward = torch.empty((max_len, agent_num + agent_num * use_prior), dtype=torch.float32, device=self.device)
+        self.reward = torch.empty((max_len, agent_num + agent_num * self.use_prior), dtype=torch.float32, device=self.device)
         self.done = torch.empty((max_len, 1), dtype=torch.float32, device=self.device)
+
+        self.state_rms = utils.RunningMeanStd(shape=(state_dim,))
 
     def append(self, state, action, reward, done):
         if self.now_len >= self.max_len:
@@ -24,13 +29,31 @@ class ExpBuffer:
 
         self.now_len += 1
 
+    def update_rms(self):
+        self.state_rms.update(self.state[:self.now_len])
+        print("state mean:", self.state_rms.mean.cpu().numpy(), ",  state variance: ", self.state_rms.var.cpu().numpy())
+
+    def normalize_obs(self, state):
+        """
+        Normalize observations using this VecNormalize's observations statistics.
+        Calling this method does not update statistics.
+        """
+        epsilon = 1e-8
+        state = (state - self.state_rms.mean) / torch.sqrt(self.state_rms.var + epsilon)
+        return state
+
     def sample_batch(self, batch_size):
         indices = torch.randint(self.now_len - 1, size=(batch_size,), device=self.device)
-        return self.state[indices], self.reward[indices], self.action[indices], self.done[indices]
+        state = self.state[indices]
+        if self.use_state_norm:
+            state = self.normalize_obs(state)
+        return state, self.reward[indices], self.action[indices], self.done[indices]
 
     def sample_all(self):
-        return self.state[:self.now_len], self.reward[:self.now_len], \
-               self.action[:self.now_len], self.done[:self.now_len]
+        state = self.state[:self.now_len]
+        if self.use_state_norm:
+            state = self.normalize_obs(state)
+        return state, self.reward[:self.now_len], self.action[:self.now_len], self.done[:self.now_len]
 
     def empty_buffer_before_explore(self):
         self.now_len = 0

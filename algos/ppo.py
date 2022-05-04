@@ -1,23 +1,33 @@
 import torch
 import numpy as np
+import utils
 from algos.base import AgentBase
 from algos.model import ACModel
 
 
 class PPO(AgentBase):
-    def __init__(self, env, batch_size=512, target_steps=2048, repeat_times=4, prior=None):
+    def __init__(self, env, args, batch_size=512, target_steps=2048, repeat_times=4, prior=None):
         super().__init__(env, prior)
+        self.use_gae = args.use_gae
+        self.use_state_norm = args.use_state_norm
         self.share_reward = False
         self.param_share = True
 
-        self.batch_size = batch_size        # how many frames for each update
-        self.repeat_times = repeat_times    # how many times to reuse the memory
+        # self.batch_size = batch_size        # how many frames for each update
+        # self.repeat_times = repeat_times    # how many times to reuse the memory
         self.target_steps = target_steps
+        self.repeat_times = args.ppo_epoch
+        self.num_mini_batch = args.num_mini_batch
+        self.batch_size = target_steps / args.num_mini_batch
 
         self.clip_eps = 0.2  # ratio.clamp(1 - clip, 1 + clip)
         self.lambda_entropy = 0.01  # could be 0.02
         self.value_loss_coef = 0.5
         self.max_grad_norm = 1
+
+        if args.use_value_norm:
+            self.use_value_norm = True
+            self.value_normalizer = utils.ValueNorm(self.agent_num, device=self.device)
 
         for aid in range(env.agent_num):
             self.acmodels.append(ACModel(env.state_space, env.action_space))
@@ -57,6 +67,8 @@ class PPO(AgentBase):
                 ep_steps += 1
             if tb_writer:
                 tb_writer.add_info(ep_steps, ep_returns, self.pweight)
+        if self.use_state_norm:
+            buffer.update_rms()
         return steps
 
     def update_parameters(self, buffer, tb_writer=None, clip_grad=False, add_noise=False):
@@ -70,50 +82,62 @@ class PPO(AgentBase):
                 logprob = dist.log_prob(buf_action[:, aid])
                 buf_value[:, aid] = value
                 buf_logprob[:, aid] = logprob
-            buf_r_sum, buf_advantage = self.compute_reward_adv(buf_len, buf_reward, buf_done, buf_value)
+            if self.use_value_norm:
+                buf_value = self.value_normalizer.denormalize(buf_value)
+            if self.use_gae:
+                buf_r_sum, buf_advantage = self.compute_reward_gae(buf_len, buf_reward, buf_done, buf_value)
+            else:
+                buf_r_sum, buf_advantage = self.compute_reward_adv(buf_len, buf_reward, buf_done, buf_value)
+            if self.use_value_norm:
+                self.value_normalizer.update(buf_r_sum)
             del buf_reward, buf_done
 
         if self.share_reward:
             adv_mean = buf_advantage.mean(dim=1, keepdim=True)
             buf_advantage = adv_mean.repeat(1, self.agent_num)
 
-        for i in range(int(self.repeat_times * buf_len / self.batch_size)):
-            indices = torch.randint(buf_len, size=(self.batch_size,), requires_grad=False, device=self.device)
-            sb_state = buf_state[indices]
-            sb_action = buf_action[indices]
-            sb_value = buf_value[indices]
-            sb_r_sum = buf_r_sum[indices]
-            sb_logprob = buf_logprob[indices]
-            sb_advantage = buf_advantage[indices]
+        # for i in range(int(self.repeat_times * buf_len / self.batch_size)):
+        for i in range(self.repeat_times):
+            length = int(buf_len // self.num_mini_batch * self.num_mini_batch)
+            indices = torch.randperm(length, requires_grad=False, device=self.device).reshape(
+                [self.num_mini_batch, int(length / self.num_mini_batch)])
+            for ind in indices:
+                # indices = torch.randint(buf_len, size=(self.batch_size,), requires_grad=False, device=self.device)
+                sb_state = buf_state[ind]
+                sb_action = buf_action[ind]
+                sb_value = buf_value[ind]
+                sb_r_sum = buf_r_sum[ind]
+                sb_logprob = buf_logprob[ind]
+                sb_advantage = buf_advantage[ind]
 
-            for aid in range(self.agent_num):
-                dist, value = self.acmodels[aid](sb_state)
-                entropy = dist.entropy().mean()
+                for aid in range(self.agent_num):
+                    dist, value = self.acmodels[aid](sb_state)
+                    entropy = dist.entropy().mean()
 
-                ratio = torch.exp(dist.log_prob(sb_action[:, aid]) - sb_logprob[:, aid])
-                surr1 = sb_advantage[:, aid] * ratio
-                surr2 = sb_advantage[:, aid] * torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps)
-                policy_loss = -torch.min(surr1, surr2).mean()
+                    ratio = torch.exp(dist.log_prob(sb_action[:, aid]) - sb_logprob[:, aid])
+                    surr1 = sb_advantage[:, aid] * ratio
+                    surr2 = sb_advantage[:, aid] * torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps)
+                    policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_clipped = value + torch.clamp(value - sb_value[:, aid], -self.clip_eps, self.clip_eps)
-                surr1 = (value - sb_r_sum[:, aid]).pow(2)
-                surr2 = (value_clipped - sb_r_sum[:, aid]).pow(2)
-                value_loss = torch.max(surr1, surr2).mean()
+                    value_clipped = value + torch.clamp(value - sb_value[:, aid], -self.clip_eps, self.clip_eps)
+                    surr1 = (value - sb_r_sum[:, aid]).pow(2)
+                    surr2 = (value_clipped - sb_r_sum[:, aid]).pow(2)
+                    value_loss = torch.max(surr1, surr2).mean()
 
-                loss = policy_loss - self.lambda_entropy * entropy + self.value_loss_coef * value_loss
-                self.optimizers[aid].zero_grad()
-                loss.backward()
-                grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
-                if clip_grad:
-                    torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
-                # grad_norm2 = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
-                # print("agent ", aid, ": grad_norm before and after clipping ...", grad_norm, grad_norm2)
-                if add_noise and grad_norm < 1:
-                    for params in self.acmodels[aid].parameters():
-                        params.grad += torch.randn(params.grad.shape, device=self.device)
-                self.optimizers[aid].step()
-                if tb_writer:
-                    tb_writer.add_grad_info(aid, policy_loss.item(), value_loss.item(), grad_norm)
+                    loss = policy_loss - self.lambda_entropy * entropy + self.value_loss_coef * value_loss
+                    self.optimizers[aid].zero_grad()
+                    loss.backward()
+                    grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
+                    if clip_grad:
+                        torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
+                    # grad_norm2 = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
+                    # print("agent ", aid, ": grad_norm before and after clipping ...", grad_norm, grad_norm2)
+                    if add_noise and grad_norm < 1:
+                        for params in self.acmodels[aid].parameters():
+                            params.grad += torch.randn(params.grad.shape, device=self.device)
+                    self.optimizers[aid].step()
+                    if tb_writer:
+                        tb_writer.add_grad_info(aid, policy_loss.item(), value_loss.item(), grad_norm)
 
         if self.param_share and self.agent_num > 1:
             state_dict_all = [self.acmodels[aid].critic.state_dict() for aid in range(self.agent_num)]
@@ -124,23 +148,30 @@ class PPO(AgentBase):
                 self.acmodels[aid].critic.load_state_dict(avg_sd)
 
     def compute_reward_adv(self, buf_len, buf_reward, buf_done, buf_value) -> (torch.Tensor, torch.Tensor):
+        if self.use_prior or self.use_expert:
+            buf_reward = (1 - self.pweight) * buf_reward[:, :self.agent_num] + self.pweight * buf_reward[:, self.agent_num:]
+            self.pweight *= self.pdecay
         buf_r_sum = torch.empty(buf_reward.shape, dtype=torch.float32, device=self.device)  # reward sum
         pre_r_sum = 0  # reward sum of previous step
         for i in reversed(range(buf_len)):
             buf_r_sum[i] = buf_reward[i] + self.gamma * (1 - buf_done[i]) * pre_r_sum
             pre_r_sum = buf_r_sum[i]
-        if self.use_prior or self.use_expert:
-            buf_r_sum = (1 - self.pweight) * buf_r_sum[:, :self.agent_num] + self.pweight * buf_r_sum[:, self.agent_num:]
-            self.pweight *= self.pdecay
+        # if self.use_prior or self.use_expert:
+        #     buf_r_sum = (1 - self.pweight) * buf_r_sum[:, :self.agent_num] + self.pweight * buf_r_sum[:, self.agent_num:]
+        #     self.pweight *= self.pdecay
         buf_advantage = buf_r_sum - ((1 - buf_done) * buf_value)
         buf_advantage = (buf_advantage - buf_advantage.mean(dim=0)) / (buf_advantage.std(dim=0) + 1e-5)
         return buf_r_sum, buf_advantage
 
     def compute_reward_gae(self, buf_len, buf_reward, buf_done, buf_value) -> (torch.Tensor, torch.Tensor):
+        if self.use_prior or self.use_expert:
+            buf_reward = (1 - self.pweight) * buf_reward[:, :self.agent_num] + self.pweight * buf_reward[:, self.agent_num:]
+            self.pweight *= self.pdecay
         buf_r_sum = torch.empty(buf_reward.shape, dtype=torch.float32, device=self.device)  # old policy value
         buf_advantage = torch.empty(buf_reward.shape, dtype=torch.float32, device=self.device)  # advantage value
         pre_r_sum = 0  # reward sum of previous step
         pre_advantage = 0  # advantage value of previous step
+
         for i in reversed(range(buf_len)):
             buf_r_sum[i] = buf_reward[i] + self.gamma * (1 - buf_done[i]) * pre_r_sum
             pre_r_sum = buf_r_sum[i]

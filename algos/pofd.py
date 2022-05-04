@@ -6,8 +6,8 @@ from algos.model import Discriminator
 
 
 class POfD(PPO):
-    def __init__(self, env, expert, batch_size=512, target_steps=2048, repeat_times=4, prior=None):
-        super().__init__(env, batch_size, target_steps, repeat_times, prior)
+    def __init__(self, env, args, expert, batch_size=512, target_steps=2048, repeat_times=4, prior=None):
+        super().__init__(env, args, batch_size, target_steps, repeat_times, prior)
 
         self.share_reward = False
         self.param_share = True
@@ -45,6 +45,18 @@ class POfD(PPO):
             expert_actions = torch.eye(self.action_num)[expert_actions].to(self.device)
             self.expert_state_actions.append(torch.cat([expert_states, expert_actions], dim=1))
 
+    def normalize_expert(self, rms):
+        epsilon = 1e-8
+        expert_state_actions = []
+        for aid in range(self.agent_num):
+            sid = self.state_dim * aid
+            cur_mean = rms.mean[sid:sid+self.state_dim]
+            cur_var = rms.var[sid:sid+self.state_dim]
+            cur_sa = self.expert_state_actions[aid].clone().detach()
+            cur_sa[:, :self.state_dim] = (cur_sa[:, :self.state_dim] - cur_mean) / torch.sqrt(cur_var + epsilon)
+            expert_state_actions.append(cur_sa)
+        return expert_state_actions
+
     def concatenate_state_actions(self, states, actions):
         state_actions = []
         for aid in range(self.agent_num):
@@ -58,12 +70,16 @@ class POfD(PPO):
         buf_state, buf_reward, buf_action, buf_done = buffer.sample_all()
 
         buf_state_actions = self.concatenate_state_actions(buf_state, buf_action)
+        if self.use_state_norm:
+            cur_expert_sas = self.normalize_expert(buffer.state_rms)
+        else:
+            cur_expert_sas = self.expert_state_actions
         for ep in range(self.num_d_epochs):
             for aid in range(self.agent_num):
-                expert_prob = self.discriminators[aid](self.expert_state_actions[aid])
+                expert_prob = self.discriminators[aid](cur_expert_sas[aid])
                 agent_prob = self.discriminators[aid](buf_state_actions[aid])
                 term1 = self.bce_loss(agent_prob, torch.ones((buf_state_actions[aid].shape[0], 1), device=self.device))
-                term2 = self.bce_loss(expert_prob, torch.zeros((self.expert_state_actions[aid].shape[0], 1), device=self.device))
+                term2 = self.bce_loss(expert_prob, torch.zeros((cur_expert_sas[aid].shape[0], 1), device=self.device))
                 loss = term1 + term2
                 if tb_writer:
                     tb_writer.tb_writer.add_scalar("ep_d_loss" + str(aid), loss, tb_writer.ep_num)
@@ -88,50 +104,61 @@ class POfD(PPO):
                 logprob = dist.log_prob(buf_action[:, aid])
                 buf_value[:, aid] = value
                 buf_logprob[:, aid] = logprob
-            buf_r_sum, buf_advantage = self.compute_reward_adv(buf_len, buf_reward, buf_done, buf_value)
+            if self.use_value_norm:
+                buf_value = self.value_normalizer.denormalize(buf_value)
+            if self.use_gae:
+                buf_r_sum, buf_advantage = self.compute_reward_gae(buf_len, buf_reward, buf_done, buf_value)
+            else:
+                buf_r_sum, buf_advantage = self.compute_reward_adv(buf_len, buf_reward, buf_done, buf_value)
+            if self.use_value_norm:
+                self.value_normalizer.update(buf_r_sum)
             del buf_reward, buf_done
 
         if self.share_reward:
             adv_mean = buf_advantage.mean(dim=1, keepdim=True)
             buf_advantage = adv_mean.repeat(1, self.agent_num)
 
-        for i in range(int(self.repeat_times * buf_len / self.batch_size)):
-            indices = torch.randint(buf_len, size=(self.batch_size,), requires_grad=False, device=self.device)
-            sb_state = buf_state[indices]
-            sb_action = buf_action[indices]
-            sb_value = buf_value[indices]
-            sb_r_sum = buf_r_sum[indices]
-            sb_logprob = buf_logprob[indices]
-            sb_advantage = buf_advantage[indices]
+        for i in range(self.repeat_times):
+            length = int(buf_len // self.num_mini_batch * self.num_mini_batch)
+            indices = torch.randperm(length, requires_grad=False, device=self.device).reshape(
+                [self.num_mini_batch, int(length / self.num_mini_batch)])
+            for ind in indices:
+                # indices = torch.randint(buf_len, size=(self.batch_size,), requires_grad=False, device=self.device)
+                sb_state = buf_state[ind]
+                sb_action = buf_action[ind]
+                sb_value = buf_value[ind]
+                sb_r_sum = buf_r_sum[ind]
+                sb_logprob = buf_logprob[ind]
+                sb_advantage = buf_advantage[ind]
 
-            for aid in range(self.agent_num):
-                dist, value = self.acmodels[aid](sb_state)
-                entropy = dist.entropy().mean()
+                for aid in range(self.agent_num):
+                    dist, value = self.acmodels[aid](sb_state)
+                    entropy = dist.entropy().mean()
 
-                ratio = torch.exp(dist.log_prob(sb_action[:, aid]) - sb_logprob[:, aid])
-                surr1 = sb_advantage[:, aid] * ratio
-                surr2 = sb_advantage[:, aid] * torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps)
-                policy_loss = -torch.min(surr1, surr2).mean()
+                    ratio = torch.exp(dist.log_prob(sb_action[:, aid]) - sb_logprob[:, aid])
+                    surr1 = sb_advantage[:, aid] * ratio
+                    surr2 = sb_advantage[:, aid] * torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps)
+                    policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_clipped = value + torch.clamp(value - sb_value[:, aid], -self.clip_eps, self.clip_eps)
-                surr1 = (value - sb_r_sum[:, aid]).pow(2)
-                surr2 = (value_clipped - sb_r_sum[:, aid]).pow(2)
-                value_loss = torch.max(surr1, surr2).mean()
+                    value_clipped = value + torch.clamp(value - sb_value[:, aid], -self.clip_eps, self.clip_eps)
+                    surr1 = (value - sb_r_sum[:, aid]).pow(2)
+                    surr2 = (value_clipped - sb_r_sum[:, aid]).pow(2)
+                    value_loss = torch.max(surr1, surr2).mean()
 
-                loss = policy_loss - self.lambda_entropy * entropy + self.value_loss_coef * value_loss
-                self.optimizers[aid].zero_grad()
-                loss.backward()
-                grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
-                if clip_grad:
-                    torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
-                # grad_norm2 = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
-                # print("agent ", aid, ": grad_norm before and after clipping ...", grad_norm, grad_norm2)
-                if add_noise and grad_norm < 1:
-                    for params in self.acmodels[aid].parameters():
-                        params.grad += torch.randn(params.grad.shape, device=self.device)
-                self.optimizers[aid].step()
-                if tb_writer:
-                    tb_writer.add_grad_info(aid, policy_loss.item(), value_loss.item(), grad_norm)
+                    loss = policy_loss - self.lambda_entropy * entropy + self.value_loss_coef * value_loss
+                    self.optimizers[aid].zero_grad()
+                    loss.backward()
+                    grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
+                    if clip_grad:
+                        torch.nn.utils.clip_grad_norm_(self.acmodels[aid].parameters(), self.max_grad_norm)
+                    # grad_norm2 = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodels[aid].parameters()) ** 0.5
+                    # print("agent ", aid, ": grad_norm before and after clipping ...", grad_norm, grad_norm2)
+                    if add_noise and grad_norm < 1:
+                        for params in self.acmodels[aid].parameters():
+                            params.grad += torch.randn(params.grad.shape, device=self.device)
+                    self.optimizers[aid].step()
+                    if tb_writer:
+                        tb_writer.add_grad_info(aid, policy_loss.item(), value_loss.item(), grad_norm)
 
         if self.param_share and self.agent_num > 1:
             state_dict_all = [self.acmodels[aid].critic.state_dict() for aid in range(self.agent_num)]

@@ -2,7 +2,6 @@ import numpy as np
 import os
 import torch
 import json
-import random
 import gym
 from enum import IntEnum
 from envs.rendering import fill_coords, point_in_circle
@@ -36,6 +35,7 @@ class GridWorldEnv(gym.Env):
         self.img = np.load(envfile_dir + args["img_file"])
         self.height, self.width = self.grid.shape
 
+        self.is_random = True
         self.agent_num = args["agent_num"]
         self.starts = np.array(args["starts"])
         self.goals = np.array(args["goals"])
@@ -130,8 +130,10 @@ class GridWorldEnv(gym.Env):
 
     def _transition(self, actions):
         self.agents_pre = self.agents.copy()
-        for aid in random.sample(range(self.agent_num), self.agent_num):
-        # for aid in range(self.agent_num):
+        idx = [i for i in range(self.agent_num)]
+        if self.is_random:
+            np.random.shuffle(idx)
+        for aid in idx:
             action = actions[aid]
             if torch.is_tensor(action):
                 action = action.item()

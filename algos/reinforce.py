@@ -6,8 +6,8 @@ from algos.model import ActorModel
 
 
 class REINFORCE(AgentBase):
-    def __init__(self, env, batch_size=1, prior=None):
-        super().__init__(env, prior)
+    def __init__(self, env, args, batch_size=1, prior=None):
+        super().__init__(env, args, prior)
         self.share_reward = True
         self.batch_size = batch_size    # how many episodes for each update
 
@@ -24,9 +24,9 @@ class REINFORCE(AgentBase):
             actions[aid] = action
         return actions
 
-    def collect_experiences(self, buffer, tb_writer=None, N=100):
+    def collect_experiences(self, buffer, tb_writer=None):
         if self.use_prior:
-            self.compute_lambda(N=N)
+            self.compute_lambda()
 
         buffer.empty_buffer_before_explore()
         episodes = 0
@@ -53,7 +53,7 @@ class REINFORCE(AgentBase):
             episodes += 1
         return steps
 
-    def update_parameters(self, buffer, tb_writer=None, clip_grad=False, add_noise=False):
+    def update_parameters(self, buffer, tb_writer=None):
         buf_len = buffer.now_len
         with torch.no_grad():
             buf_state, buf_reward, buf_action, buf_done = buffer.sample_all()

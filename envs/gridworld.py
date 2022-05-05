@@ -46,9 +46,14 @@ class GridWorldEnv(gym.Env):
 
         self.actions = GridWorldEnv.Actions
 
-        self.state_space = gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8')
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
-        self.action_space = gym.spaces.Discrete(4) if self.agent_num == 1 else gym.spaces.Discrete(5)
+        self.action_space = []
+        self.observation_space = []
+        for _ in self.agent_num:
+            self.action_space.append(gym.spaces.Discrete(5))
+            self.observation_space.append(gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8'))
+
+        # self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
+        # self.action_space = gym.spaces.Discrete(4) if self.agent_num == 1 else gym.spaces.Discrete(5)
 
         self.max_steps = 100
         self.step_count = 0

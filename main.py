@@ -3,6 +3,7 @@ import numpy as np
 import torch
 
 from envs.gridworld import GridWorldEnv
+from envs.mpe.environment import MPEEnv
 from algos.reinforce import REINFORCE
 from algos.ppo import PPO
 from algos.pofd import POfD
@@ -13,7 +14,13 @@ import utils
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", default=1)
 parser.add_argument("--env", default="centerSquare6x6_1a")
+parser.add_argument("--scenario_name", default="simple_spread")
+parser.add_argument('--num_agents', default=3, type=int, help='Number of agents')
+parser.add_argument("--use_done_func", default=False, action='store_true')
+parser.add_argument('--max_steps', default=25, type=int)
+
 parser.add_argument("--dense_reward", default=False, action='store_true')
+parser.add_argument("--local_obs", default=False, action='store_true')
 
 parser.add_argument("--algo", default="PPO",
                     help="algorithm to use: POfD | PPO | REINFORCE")
@@ -43,100 +50,55 @@ torch.cuda.manual_seed_all(args.seed)
 np.random.seed(args.seed)
 
 # create environment
-env_name = args.env
-env = GridWorldEnv(env_name, dense_reward=args.dense_reward)
-state_dim = env.state_space.shape[0]
-action_dim = env.action_space.n
+if "centerSquare" in args.env:
+    env_name = args.env
+    env = GridWorldEnv(env_name, dense_reward=args.dense_reward)
+    args.local_obs = False
+elif "mpe" in args.env:
+    env_name = "mpe_" + args.scenario_name + "_" + str(args.num_agents) + "a"
+    env = MPEEnv(args)
+    args.local_obs = True
+else:
+    raise ValueError("Invalid environment name: {}".format(args.env))
+
+state_dim = env.observation_space[0].shape[0]
+action_dim = env.action_space[0].n
 agent_num = env.agent_num
 
+# setup logging directory
+root_dir = "outputs_lava_suboptimal"
+model_dir = utils.get_model_dir_name(root_dir, env_name, args)
+print("Model save at: ", model_dir)
+
 # setup priors
-use_prior = args.use_prior
-pweight = args.pweight
-if use_prior:
-    env_prefix = env_name.split("_")[0]
-    prior_name = "./envfiles/" + env_prefix + "/" + env_prefix + "_prior"
-    prior = []
-    if "2a" in env_name:
-        prior_ids = [0, 2]
-    else:
-        prior_ids = list(range(agent_num))
-    for aid in range(agent_num):
-        prior.append(np.load(prior_name + str(prior_ids[aid]) + ".npy"))
+if args.use_prior:
+    prior = utils.load_prior(env_name, use_suboptimal=True)
 else:
     prior = None
 
-algorithm = args.algo
-N = args.N
-
-# setup logging directory
-model_dir = "outputs_lava_suboptimal/comparison/" + env_name
-if args.dense_reward:
-    model_dir += "_dense"
-model_dir += "_" + algorithm
-
-model_dir += "_ep" + str(args.ppo_epoch)
-model_dir += "_nbatch" + str(args.num_mini_batch)
-
-if use_prior:
-    model_dir += "_wprior"
-    model_dir += "_N" + str(N)
-
-if args.clip_grad:
-    print("apply clip grad.")
-    model_dir += "_clipGrad"
-
-if args.add_noise:
-    print("apply stochastic update.")
-    model_dir += "_gradNoise"
-
-if args.use_state_norm:
-    print("apply state normalization.")
-    model_dir += "_statenorm"
-
-if args.use_value_norm:
-    print("apply value normalization.")
-    model_dir += "_valuenorm"
-
-if args.use_gae:
-    print("use GAE.")
-    model_dir += "_useGAE"
-
-model_dir += "_r0"
-
-use_expert = False
+use_expert_traj = False
 # setup algorithms
-if algorithm == "REINFORCE":
+if args.algo == "REINFORCE":
     batch_size = 1
     max_len = env.max_steps * batch_size
-    algo = REINFORCE(env, batch_size=batch_size, prior=prior)
-elif algorithm == "PPO":
+    algo = REINFORCE(env, args, batch_size=batch_size, prior=prior)
+elif args.algo == "PPO":
     max_len = 4096
-    algo = PPO(env, args, batch_size=512, target_steps=max_len, repeat_times=4, prior=prior)
+    algo = PPO(env, args, target_steps=max_len, prior=prior)
     max_len += env.max_steps
-elif algorithm == "POfD":
-    use_expert = True
+elif args.algo == "POfD":
+    use_expert_traj = True
     max_len = 4096
-    expert = utils.load_expert(env)
-    algo = POfD(env, args, expert, batch_size=512, target_steps=max_len, repeat_times=4)
+    expert_traj = utils.load_expert_trajectory(env_name, use_suboptimal=True)
+    algo = POfD(env, args, expert_traj, target_steps=max_len)
     max_len += env.max_steps
 else:
-    raise ValueError("Incorrect algorithm name: {}".format(algorithm))
-
-if use_prior or use_expert:
-    algo.pweight = args.pweight
-    algo.pdecay = args.pdecay
-
-    model_dir += "_pw" + str(algo.pweight)
-    model_dir += "_pd" + str(algo.pdecay)
-
-model_dir += "_seed" + str(args.seed)
-
-if args.run >= 0:
-    model_dir += "_run" + str(args.run)
+    raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
 buffer = ExpBuffer(max_len, state_dim, agent_num, args)
-tb_writer = utils.tb_writer(model_dir, agent_num, use_prior, use_expert)
+tb_writer = utils.tb_writer(model_dir, agent_num, args.use_prior)
 
+# try to load existing models
 try:
     status = torch.load(model_dir + "/best_status.pt", map_location=device)
     algo.load_status(status)
@@ -144,17 +106,17 @@ try:
     num_frames = status["num_frames"]
     tb_writer.ep_num = status["num_episode"]
     best_return = status["best_return"]
-    if use_prior or use_expert:
+    if args.use_prior or use_expert_traj:
         algo.pweight = status["pweight"]
 except OSError:
     update = 0
     num_frames = 0
     best_return = -999999
 
-
+# start to train
 while num_frames < target_frames:
     frames = algo.collect_experiences(buffer, tb_writer)
-    algo.update_parameters(buffer, tb_writer, args.clip_grad, args.add_noise)
+    algo.update_parameters(buffer, tb_writer)
     num_frames += frames
     avg_returns = tb_writer.log(num_frames)
 
@@ -166,14 +128,14 @@ while num_frames < target_frames:
                   "num_episode": tb_writer.ep_num, "best_return": best_return,
                   "model_state": [acmodel.state_dict() for acmodel in algo.acmodels],
                   "optimizer_state": [optimizer.state_dict() for optimizer in algo.optimizers]}
-        if algorithm == "POfD":
+        if args.algo == "POfD":
             status["discriminator_state"] = [discrim.state_dict() for discrim in algo.discriminators]
             status["d_optimizer_state"] = [optimizer.state_dict() for optimizer in algo.d_optimizers]
-        if use_prior or use_expert:
+        if args.use_prior or use_expert_traj:
             status["pweight"] = algo.pweight
         torch.save(status, model_dir + "/last_status.pt")
-        # if update % 3 == 0:
-        #     torch.save(status, model_dir + "/status_" + str(update) + ".pt")
+        if update % 10 == 0:
+            torch.save(status, model_dir + "/status_" + str(update) + "_" + str(num_frames) + ".pt")
         if np.all(avg_returns > best_return):
             best_return = avg_returns.copy()
             torch.save(status, model_dir + "/best_status.pt")

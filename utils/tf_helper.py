@@ -5,13 +5,12 @@ np.set_printoptions(precision=2)
 
 
 class tb_writer:
-    def __init__(self, model_dir, agent_num, use_prior, use_expert):
+    def __init__(self, model_dir, agent_num, use_prior):
         self.model_dir = model_dir
         self.tb_writer = tensorboardX.SummaryWriter(model_dir)
         self.csv_file, self.csv_logger = utils.get_csv_logger(self.model_dir, mode="a")
         self.agent_num = agent_num
         self.use_prior = use_prior
-        self.use_expert = use_expert
         self.pweight = 0
         self.now_len = 0
         self.max_len = 4096

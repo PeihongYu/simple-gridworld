@@ -68,7 +68,10 @@ def load_prior(env_name, use_suboptimal=True):
     else:
         prior_ids = list(range(agent_num))
     for aid in range(agent_num):
-        prior.append(np.load(prior_name + str(prior_ids[aid]) + ".npy"))
+        temp = np.load(prior_name + str(prior_ids[aid]) + ".npy")
+        cur_prior = np.zeros([5, 10, 10])
+        cur_prior[:4, :, :] = temp
+        prior.append(cur_prior)
     return prior
 
 

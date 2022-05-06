@@ -12,7 +12,7 @@ import utils
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--seed", default=1)
+parser.add_argument("--seed", default=1, type=int)
 parser.add_argument("--env", default="centerSquare6x6_1a")
 parser.add_argument("--scenario_name", default="simple_spread")
 parser.add_argument('--num_agents', default=3, type=int, help='Number of agents')
@@ -36,7 +36,7 @@ parser.add_argument("--use_state_norm", default=False, action='store_true')
 parser.add_argument("--use_value_norm", default=False, action='store_true')
 parser.add_argument("--use_gae", default=False, action='store_true')
 
-parser.add_argument("--frames", type=int, default=4000000)
+parser.add_argument("--frames", type=int, default=5000000)
 parser.add_argument('--run', type=int, default=-1)
 args = parser.parse_args()
 
@@ -66,7 +66,7 @@ action_dim = env.action_space[0].n
 agent_num = env.agent_num
 
 # setup logging directory
-root_dir = "outputs_lava_suboptimal"
+root_dir = "outputs_lava"
 model_dir = utils.get_model_dir_name(root_dir, env_name, args)
 print("Model save at: ", model_dir)
 
@@ -134,8 +134,8 @@ while num_frames < target_frames:
         if args.use_prior or use_expert_traj:
             status["pweight"] = algo.pweight
         torch.save(status, model_dir + "/last_status.pt")
-        if update % 10 == 0:
-            torch.save(status, model_dir + "/status_" + str(update) + "_" + str(num_frames) + ".pt")
+        # if update % 10 == 0:
+        #     torch.save(status, model_dir + "/status_" + str(update) + "_" + str(num_frames) + ".pt")
         if np.all(avg_returns > best_return):
             best_return = avg_returns.copy()
             torch.save(status, model_dir + "/best_status.pt")

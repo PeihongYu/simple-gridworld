@@ -48,7 +48,7 @@ class GridWorldEnv(gym.Env):
 
         self.action_space = []
         self.observation_space = []
-        for _ in self.agent_num:
+        for _ in range(self.agent_num):
             self.action_space.append(gym.spaces.Discrete(5))
             self.observation_space.append(gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8'))
 

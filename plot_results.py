@@ -1,3 +1,4 @@
+from glob import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -11,6 +12,27 @@ def smooth(scalars, weight):  # Weight between 0 and 1
         last = smoothed_val                                  # Anchor the last smoothed value
 
     return smoothed
+
+
+def plot_multi_runs_mean_var(folder, num, label):
+    folders = glob(folder + "*/", recursive=False)
+    rewards = []
+    xs = None
+    for f in folders:
+        file_name = f + "log.csv"
+        data = np.genfromtxt(file_name, delimiter=',')
+        rewards.append(data[:, 2: 2+num].mean(axis=1))
+        if xs is None or len(data[:, 0]) < len(xs):
+            xs = data[:, 0]
+    curl = len(xs)
+    rewards = np.array([rs[:curl] for rs in rewards])
+    rmean = np.array(smooth(np.mean(rewards, axis=0), 0.99))
+    rstd = 0.5 * np.array(smooth(np.std(rewards, axis=0), 0.99))
+
+    plt.plot(xs, rmean, color='b', label=label)
+    plt.fill_between(xs, rmean + rstd, rmean - rstd, color='b', alpha=0.1)
+
+    return xs
 
 
 def plot_multi_runs(folder, run_num):
@@ -37,11 +59,19 @@ def plot_single_run(folder):
 
 
 if __name__ == "__main__":
-    # folder = "outputs_batch/centerSquare6x6_3a_PPO_wprior0.998_N1000_gradNoise"
-    # run_num = 9
-    # plot_multi_runs(folder, run_num)
 
-    folder = 'outputs_lava/centerSquare6x6_2a_PPO_wprior0.995_N1000_gradNoise_run1r0'
-    plot_single_run(folder)
+    agent_num = 2
+
+    folder = "./outputs_lava_batch/centerSquare6x6_2a_PPO_wprior0.995_N1000_gradNoise"
+    label = "algo-1"
+    xs = plot_multi_runs_mean_var(folder, agent_num, label)
+
+    # plot the oracle
+    plt.plot(xs, np.ones(len(xs)) * 8.38, color='r', label="Oracle")
+    plt.legend()
+    plt.show()
+
+    # folder = 'outputs_lava/centerSquare6x6_2a_PPO_wprior0.995_N1000_gradNoise_run1r0'
+    # plot_single_run(folder)
 
 

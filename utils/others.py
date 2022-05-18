@@ -7,8 +7,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def get_model_dir_name(root_dir, env_name, args):
-    # environment name
     model_dir = root_dir + "/" + env_name
+
+    if args.num_agents == 1:
+        if args.mpe_fixed_map and args.mpe_aid >= 0:
+            model_dir += "_" + str(args.mpe_aid)
+        if args.mpe_tid >= 0:
+            model_dir += "_t" + str(args.mpe_tid)
+
     if args.dense_reward:
         model_dir += "_dense"
 
@@ -54,52 +60,52 @@ def get_model_dir_name(root_dir, env_name, args):
 
     return model_dir
 
+
 def load_prior(env_name, use_suboptimal=True):
-    env_prefix = env_name.split("_")[0]
     if use_suboptimal:
         type_str = "_suboptimal"
     else:
         type_str = ""
-    prior_name = "priors/" + env_prefix + type_str + "_prior"
-    prior = []
-    agent_num = int(env_name[-2])
-    if agent_num == 2:
-        prior_ids = [0, 2]
+    if "appleDoor" in env_name:
+        env_prefix = env_name
+        prior_name = "priors/" + env_prefix + type_str + "_prior"
+        prior = []
+        for aid in range(2):
+            cur_prior = np.load(prior_name + str(aid) + ".npy")
+            prior.append(cur_prior)
     else:
-        prior_ids = list(range(agent_num))
-    for aid in range(agent_num):
-        temp = np.load(prior_name + str(prior_ids[aid]) + ".npy")
-        cur_prior = np.zeros([5, 10, 10])
-        cur_prior[:4, :, :] = temp
-        prior.append(cur_prior)
+        env_prefix = env_name.split("_")[0]
+        prior_name = "priors/" + env_prefix + type_str + "_prior"
+        prior = []
+        agent_num = int(env_name[-2])
+        if agent_num == 2:
+            prior_ids = [0, 2]
+        else:
+            prior_ids = list(range(agent_num))
+        for aid in range(agent_num):
+            temp = np.load(prior_name + str(prior_ids[aid]) + ".npy")
+            cur_prior = temp
+            if use_suboptimal:
+                cur_prior = np.zeros([5, 10, 10])
+                cur_prior[:4, :, :] = temp
+            prior.append(cur_prior)
     return prior
 
 
 def load_expert_trajectory(env_name, use_suboptimal=True):
-    agent_num = int(env_name[-2])
+    agent_num = int(env_name[-2]) if "appleDoor" not in env_name else 2
     if "centerSquare" in env_name:
         expert_traj = load_expert_trajectory_gridworld_lava(agent_num, use_suboptimal)
+    elif "appleDoor" in env_name:
+        expert_traj = load_expert_trajectory_appledoor(env_name, agent_num, use_suboptimal)
     elif "mpe" in env_name:
-        expert_traj = load_expert_trajectory_simple_spread(agent_num, use_suboptimal)
+        if "fixed" in env_name:
+            expert_traj = load_expert_trajectory_simple_spread_fixed(agent_num)
+        else:
+            expert_traj = load_expert_trajectory_simple_spread(agent_num, use_suboptimal)
     else:
         raise ValueError("No demonstration for such environment.")
     return expert_traj
-
-
-def load_expert_trajectory_simple_spread(agent_num, use_suboptimal=True):
-    if use_suboptimal:
-        type_str = "_suboptimal"
-    else:
-        type_str = "_best"
-    expert_states = []
-    expert_actions = []
-    for aid in range(agent_num):
-        states = np.genfromtxt("trajs/mpe_simple_spread_random" + type_str + "_states.csv")
-        actions = np.genfromtxt("trajs/mpe_simple_spread_random" + type_str + "_actions.csv")
-        expert_states.append(states)
-        expert_actions.append(actions)
-    expert = {"states": expert_states, "actions": expert_actions}
-    return expert
 
 
 def load_expert_trajectory_gridworld_lava(agent_num, use_suboptimal=True):
@@ -122,6 +128,57 @@ def load_expert_trajectory_gridworld_lava(agent_num, use_suboptimal=True):
     return expert
 
 
+def load_expert_trajectory_appledoor(env_name, agent_num, use_suboptimal=True):
+    if use_suboptimal:
+        type_str = "_suboptimal"
+    else:
+        type_str = ""
+    expert_states = []
+    expert_actions = []
+    for aid in range(agent_num):
+        states = np.genfromtxt("trajs/" + env_name + type_str + "_states{0}.csv".format(aid))
+        actions = np.genfromtxt("trajs/" + env_name + type_str + "_actions{0}.csv".format(aid), dtype=np.int32)
+        expert_states.append(states)
+        expert_actions.append(actions)
+    expert = {"states": expert_states, "actions": expert_actions}
+    return expert
+
+
+def load_expert_trajectory_simple_spread(agent_num, use_suboptimal=True):
+    if use_suboptimal:
+        type_str = "_suboptimal"
+    else:
+        type_str = "_best"
+    expert_states = []
+    expert_actions = []
+    for aid in range(agent_num):
+        # states = np.genfromtxt("trajs/mpe_simple_spread_random" + type_str + "_states.csv")
+        # actions = np.genfromtxt("trajs/mpe_simple_spread_random" + type_str + "_actions.csv")
+        states = np.genfromtxt("trajs/mpe_simple_spread" + type_str + "_states.csv")
+        actions = np.genfromtxt("trajs/mpe_simple_spread" + type_str + "_actions.csv")
+        expert_states.append(states)
+        expert_actions.append(actions)
+    expert = {"states": expert_states, "actions": expert_actions}
+    return expert
+
+
+def load_expert_trajectory_simple_spread_fixed(agent_num):
+    # if use_suboptimal:
+    #     type_str = "_suboptimal"
+    # else:
+    #     type_str = "_best"
+    type_str = "_best"
+    expert_states = []
+    expert_actions = []
+    for aid in range(agent_num):
+        states = np.genfromtxt("trajs/mpe_simple_spread" + type_str + "_states{0}.csv".format(aid))
+        actions = np.genfromtxt("trajs/mpe_simple_spread" + type_str + "_actions{0}.csv".format(aid), dtype=np.int32)
+        expert_states.append(states)
+        expert_actions.append(actions)
+    expert = {"states": expert_states, "actions": expert_actions}
+    return expert
+
+
 def load_models(model_dir, env, model="best", use_local_obs=False):
     acmodels = []
     if model == "best":
@@ -129,7 +186,7 @@ def load_models(model_dir, env, model="best", use_local_obs=False):
     elif model == "last":
         status = torch.load(model_dir + "/last_status.pt", map_location=device)
     else:
-        status = torch.load(model_dir + "/status_" + str(model) +".pt", map_location=device)
+        status = torch.load(model_dir + "/status_" + str(model) + ".pt", map_location=device)
     if "REINFORCE" in model_dir:
         for aid in range(env.agent_num):
             acmodels.append(ActorModel(env.observation_space, env.action_space))
@@ -175,7 +232,7 @@ def load_discriminator(model_dir, env, model="best"):
     elif model == "last":
         status = torch.load(model_dir + "/last_status.pt", map_location=device)
     else:
-        status = torch.load(model_dir + "/status_" + str(model) +".pt", map_location=device)
+        status = torch.load(model_dir + "/status_" + str(model) + ".pt", map_location=device)
 
     for aid in range(env.agent_num):
         state_dim = int(env.observation_space[aid].shape[0] / env.agent_num)
@@ -185,7 +242,6 @@ def load_discriminator(model_dir, env, model="best"):
         discriminarors[aid].to(device)
 
     return discriminarors
-
 
 # def draw_policy(agent, goal, model, ax):
 #     # agent
@@ -197,4 +253,3 @@ def load_discriminator(model_dir, env, model="best"):
 #     ax.fill([goal_x, goal_x, goal_x + 1, goal_x + 1], [goal_y, goal_y + 1, goal_y + 1, goal_y], facecolor='green')
 #
 #     goal = env.goal
-

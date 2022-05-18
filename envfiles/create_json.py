@@ -44,7 +44,7 @@ def save_json_appledoor(env_name, agent_poses, goal_poses, door_pose, suffix):
 
 def update_img(img, agent_poses, goal_poses, door_pose=None, tile_size=30):
     if door_pose:
-        door_tile = create_door(tile_size, colors[1], 2)
+        door_tile = create_door(tile_size, 2, colors[1])
         x = door_pose[0] * tile_size
         y = door_pose[1] * tile_size
         img[x:x + tile_size, y:y + tile_size] = door_tile
@@ -102,8 +102,8 @@ def get_setups_lava(agent_num):
 
 if __name__ == '__main__':
     names = ["centerSquare6x6", "centerSquare8x8", "upperLeftSquare", "appleDoor"]
+    env_name = "appleDoor"
     # env_name = "centerSquare6x6"
-    env_name = "centerSquare6x6"
     if "Square" in env_name:
         # for agent_num in range(1, 5):
         #     agent_poses, goal_poses = get_setups_lava(agent_num)
@@ -119,9 +119,11 @@ if __name__ == '__main__':
 
     elif "appleDoor" in env_name:
         agent_poses = [[2, 0], [2, 5]]
-        goal_poses = [[2, 6], [2, 9]]
+        # goal_poses = [[2, 6], [2, 9]]
+        goal_poses = [[2, 9], [0, 7]]
         door_pose = [2, 3]
-        suffix = "a"
+        # suffix = "a"
+        suffix = "b"
         save_json_appledoor(env_name, agent_poses, goal_poses, door_pose, suffix)
         save_figure(env_name, agent_poses, goal_poses, door_pose, suffix)
 

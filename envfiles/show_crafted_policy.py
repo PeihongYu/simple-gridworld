@@ -1,13 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from envs.gridworld import GridWorldEnv
+from envs.appledoor import AppleDoorEnv
 from envfiles.funcs.utils import *
 
 
 def visualize_policy(agent_pose, goal_pose, prior):
+    d, h, w = prior.shape
+
     plt.grid(True, axis='both', color='black', alpha=0.5, linestyle='--')
-    plt.xlim(0, 10)
-    plt.ylim(0, 10)
+    plt.xlim(0, w)
+    plt.ylim(0, h)
 
     # agent
     self_y, self_x = agent_pose
@@ -17,8 +20,9 @@ def visualize_policy(agent_pose, goal_pose, prior):
     goal_y, goal_x = goal_pose
     plt.fill([goal_x, goal_x, goal_x + 1, goal_x + 1], [goal_y, goal_y + 1, goal_y + 1, goal_y], facecolor='green')
 
-    for i in range(10):
-        for j in range(10):
+
+    for i in range(h):
+        for j in range(w):
             actions = prior[:, i, j]
             if prior[:, i, j].sum() > 0:
                 actions /= prior[:, i, j].sum()
@@ -40,10 +44,15 @@ def visualize_policy(agent_pose, goal_pose, prior):
 
 if __name__ == '__main__':
     # env_name = "centerSquare8x8"
-    env_name = "centerSquare6x6"
     # dir_name = generate_dir(env_name)
-    dir_name = "../priors/centerSquare6x6_suboptimal"
-    env = GridWorldEnv(env_name + "_4a")
+
+    # env_name = "centerSquare6x6"
+    # dir_name = "../priors/centerSquare6x6_suboptimal"
+    # env = GridWorldEnv(env_name + "_4a")
+
+    env_name = "appleDoor_b"
+    dir_name = "../priors/appleDoor_b"
+    env = AppleDoorEnv(env_name)
     for aid in range(len(env.agents)):
         prior = np.load(dir_name + "_prior" + str(aid) + ".npy")
         # prior = np.load(env_name.split("_")[0] +"/" + env_name.split("_")[0] + "_prior.npy")

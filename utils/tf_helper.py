@@ -13,7 +13,7 @@ class tb_writer:
         self.use_prior = use_prior
         self.pweight = 0
         self.now_len = 0
-        self.max_len = 4096
+        self.max_len = 4096 * 2
         self.is_full = False
         self.avg_range = 100
         self.ep_num = 0

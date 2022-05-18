@@ -1,4 +1,5 @@
 from envs.gridworld import GridWorldEnv
+from envs.appledoor import AppleDoorEnv
 from envs.window import Window
 
 
@@ -65,9 +66,14 @@ def key_handler(event):
 # centerSquare_1a
 # centerSquare_2a
 # empty_1a
-env_name = "centerSquare6x6_1a"
+# env_name = "centerSquare6x6_1a"
 
-env = GridWorldEnv(env_name, dense_reward=True, visualize=True)
+# env = GridWorldEnv(env_name, dense_reward=True, visualize=True)
+
+
+env_name = "appleDoor_b"
+env = AppleDoorEnv(env_name, dense_reward=False, visualize=True)
+
 actions = []
 action_num = env.agent_num
 

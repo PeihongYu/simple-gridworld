@@ -1,5 +1,5 @@
-import numpy as np
 import os
+import numpy as np
 import torch
 import json
 import gym
@@ -35,7 +35,7 @@ class GridWorldEnv(gym.Env):
         self.img = np.load(envfile_dir + args["img_file"])
         self.height, self.width = self.grid.shape
 
-        self.is_random = True
+        self.random_transition_order = True
         self.agent_num = args["agent_num"]
         self.starts = np.array(args["starts"])
         self.goals = np.array(args["goals"])
@@ -136,7 +136,7 @@ class GridWorldEnv(gym.Env):
     def _transition(self, actions):
         self.agents_pre = self.agents.copy()
         idx = [i for i in range(self.agent_num)]
-        if self.is_random:
+        if self.random_transition_order:
             np.random.shuffle(idx)
         for aid in idx:
             action = actions[aid]

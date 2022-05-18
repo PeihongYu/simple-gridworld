@@ -46,7 +46,7 @@ def create_lava(tile_size):
     return tile
 
 
-def create_door(tile_size, color, status):
+def create_door(tile_size, status, color=colors[1]):
     # status: 0 -- open; 1 -- locked; 2 -- unlocked
     tile = np.zeros([tile_size, tile_size, 3])
 

@@ -11,7 +11,10 @@ if __name__ == '__main__':
     # parse arguments
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('-s', '--scenario', default='simple_spread.py', help='Path of the scenario Python script.')
-    parser.add_argument('--num_agents', default=3, type=int, help='Number of agents.')
+    parser.add_argument('--num_agents', default=1, type=int, help='Number of agents.')
+    parser.add_argument("--use_done_func", default=False, action='store_true')
+    parser.add_argument('--max_steps', default=100, type=int)
+    parser.add_argument("--mpe_sparse_reward", default=False, action='store_true')
     args = parser.parse_args()
 
     # load scenario from script
@@ -19,7 +22,7 @@ if __name__ == '__main__':
     # create world
     world = scenario.make_world(args)
     # create multiagent environment
-    env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, done_callback=scenario.done, info_callback=None, shared_viewer=False)
+    env = MultiAgentEnv(world, args, scenario.reset_world, scenario.reward, scenario.observation, done_callback=scenario.done, info_callback=None, shared_viewer=True)
     # render call to create viewer window (necessary only for interactive policies)
     env.render()
     # create interactive policies for each agent
@@ -30,7 +33,7 @@ if __name__ == '__main__':
         # query for action from each agent's policy
         act_n = []
         for i, policy in enumerate(policies):
-            act_n.append(policy.action(obs_n[i]))
+            act_n.append(policy.action(obs_n["vec"][i]))
         # step environment
         obs_n, reward_n, done_n, _ = env.step(act_n)
         # render all agent views

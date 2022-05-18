@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import time
 import utils
 from algos.base import AgentBase
 from algos.model import ACModel
@@ -65,6 +66,7 @@ class PPO(AgentBase):
         buffer.empty_buffer_before_explore()
         steps = 0
         ep_returns = np.zeros(self.agent_num * (1 + self.use_prior))
+        stime = time.time()
         while steps < self.target_steps:
             state = self.env.reset()
             done = False
@@ -73,6 +75,7 @@ class PPO(AgentBase):
             while not done:
                 action = self.select_action(state["vec"])
                 next_state, reward, done, _ = self.env.step(action)
+                # self.env.render()
                 if self.use_prior:
                     shadow_reward = self.compute_shadow_r(state["vec"], action)
                     reward = reward + shadow_reward
@@ -83,6 +86,9 @@ class PPO(AgentBase):
                 ep_steps += 1
             if tb_writer:
                 tb_writer.add_info(ep_steps, ep_returns, self.pweight)
+        etime = time.time()
+        fps = steps / (etime - stime)
+        print("FPS: ", fps)
         if self.use_state_norm:
             buffer.update_rms()
         return steps

@@ -1,14 +1,16 @@
+import os
 import numpy as np
 import torch
 import json
-import random
 import gym
 from enum import IntEnum
 from envs.rendering import fill_coords, point_in_circle
 from envfiles.create_world import create_tile, colors
+from envfiles.funcs.utils import create_door
 
 # left, right, up, down
 ACTIONS = [(0, -1), (0, 1), (1, 0), (-1, 0)]
+ACTIONS_NAME = ["left", "right", "up", "down", "stay"]
 
 
 class AppleDoorEnv(gym.Env):
@@ -21,32 +23,53 @@ class AppleDoorEnv(gym.Env):
         down = 3
         stay = 4
 
-    def __init__(self, json_file, visualize=False):
+    class DoorStatus(IntEnum):
+        open = 0
+        locked = 1
+        unlocked = 2
 
+    def __init__(self, env_name, dense_reward=False, visualize=False):
+        self.env_name = env_name
+        envfile_dir = "./envfiles/" + env_name.split("_")[0] + "/"
+        if "envfiles" in os.getcwd():
+            envfile_dir = env_name.split("_")[0] + "/"
+        json_file = envfile_dir + env_name + ".json"
         with open(json_file) as infile:
             args = json.load(infile)
-        self.grid = np.load(args["grid_file"])
-        self.reward_mat = np.load(args["reward_file"])
-        self.img = np.load(args["img_file"])
+        self.grid = np.load(envfile_dir + args["grid_file"])
+        self.lava = np.load(envfile_dir + args["lava_file"])
+        self.img = np.load(envfile_dir + args["img_file"])
         self.height, self.width = self.grid.shape
 
+        self.random_transition_order = True
         self.agent_num = args["agent_num"]
         self.starts = np.array(args["starts"])
         self.goals = np.array(args["goals"])
-        self.door = np.array_equal(args["door"])
         self.agents = self.starts.copy()
         self.agents_pre = self.starts.copy()
+
+        if self.agent_num == 2:
+            self.door = np.array(args["door"])
+            self.door_status = AppleDoorEnv.DoorStatus.locked
+
         self.collide = False
+        self.step_in_lava = False
 
         self.actions = AppleDoorEnv.Actions
 
-        self.state_space = gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8')
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
-        self.action_space = gym.spaces.Discrete(4) if self.agent_num == 1 else gym.spaces.Discrete(5)
+        self.action_space = []
+        self.observation_space = []
+        for _ in range(self.agent_num):
+            self.action_space.append(gym.spaces.Discrete(5))
+            self.observation_space.append(gym.spaces.Box(low=0, high=self.height-1, shape=(2 * self.agent_num, ), dtype='uint8'))
+
+        # self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, 3), dtype='uint8')
+        # self.action_space = gym.spaces.Discrete(4) if self.agent_num == 1 else gym.spaces.Discrete(5)
 
         self.max_steps = 100
         self.step_count = 0
 
+        self.dense_reward = dense_reward
         self.visualize = visualize
         self.initialize_img()
         self.cur_img = None
@@ -58,10 +81,28 @@ class AppleDoorEnv(gym.Env):
         self.step_count = 0
         self.agents = self.starts.copy()
         self.agents_pre = self.starts.copy()
+        if self.agent_num == 2:
+            self.close_door()
         if self.visualize:
             self.cur_img = self.img.copy()
             self.update_img()
         return self.state
+
+    def update_door_status(self):
+        if np.array_equal(self.agents[1], self.goals[1]):
+            self.open_door()
+        else:
+            self.close_door()
+
+    def close_door(self):
+        x, y = self.door
+        self.grid[x, y] = 1
+        self.door_status = AppleDoorEnv.DoorStatus.locked
+
+    def open_door(self):
+        x, y = self.door
+        self.grid[x, y] = 0
+        self.door_status = AppleDoorEnv.DoorStatus.open
 
     @property
     def state(self):
@@ -77,7 +118,7 @@ class AppleDoorEnv(gym.Env):
 
     @property
     def done(self):
-        if np.array_equal(self.agents, self.goals) or (self.step_count >= self.max_steps):
+        if self.step_in_lava or np.array_equal(self.agents[0], self.goals[0]) or (self.step_count >= self.max_steps):
             done = True
         else:
             done = False
@@ -88,11 +129,16 @@ class AppleDoorEnv(gym.Env):
             return True
         return False
 
+    def _occupied_by_lava(self, i, j):
+        if self.lava[i, j] == 1:
+            return True
+        return False
+
     def _occupied_by_agent(self, cur_id, i, j):
         for aid in range(self.agent_num):
             if aid == cur_id:
                 pass
-            if np.array_equal(self.agents[aid], [i, j]):
+            elif np.array_equal(self.agents[aid], [i, j]):
                 self.collide = True
                 return True
         return False
@@ -118,8 +164,10 @@ class AppleDoorEnv(gym.Env):
 
     def _transition(self, actions):
         self.agents_pre = self.agents.copy()
-        for aid in random.sample(range(self.agent_num), self.agent_num):
-        # for aid in range(self.agent_num):
+        idx = [i for i in range(self.agent_num)]
+        if self.random_transition_order:
+            np.random.shuffle(idx)
+        for aid in idx:
             action = actions[aid]
             if torch.is_tensor(action):
                 action = action.item()
@@ -145,17 +193,25 @@ class AppleDoorEnv(gym.Env):
         self.step_count += 1
         self._transition(actions)
 
+        if self.agent_num == 2:
+            self.update_door_status()
+
         if self.visualize:
             self.update_img()
 
         reward = self._reward()
-        self.collide = False
-        done = self.done or -2 in reward
-        if -2 in reward:
-            for i in range(len(reward)):
-                reward[i] = 0
 
-        return self.state, reward, done, {}
+        done = self.done
+
+        info = []
+        if self.collide:
+            info += "collide"
+            self.collide = False
+        if self.step_in_lava:
+            info = "in lava"
+            self.step_in_lava = False
+
+        return self.state, reward, done, info
 
     def _reward(self):
         rewards = [0] * self.agent_num
@@ -164,9 +220,15 @@ class AppleDoorEnv(gym.Env):
             i, j = self.agents[aid]
             if (self.goals[aid][0] == i) and (self.goals[aid][1] == j):
                 reach_goal[aid] = True
+            if self.collide:
+                rewards[aid] = -1
+            elif self._occupied_by_lava(i, j):
+                rewards[aid] = 0
+                self.step_in_lava = True
             else:
-                rewards[aid] = -10 if self.collide else self.reward_mat[i, j]
-        if np.all(reach_goal):
+                rewards[aid] = -abs(self.goals[aid] - self.agents[aid]).sum() / 100 if self.dense_reward else 0
+                #self.lava[i, j] * -2
+        if reach_goal[0]:
             for aid in range(self.agent_num):
                 rewards[aid] = 10 - 9 * (self.step_count / self.max_steps)
         return rewards
@@ -191,12 +253,24 @@ class AppleDoorEnv(gym.Env):
             y = self.agents_pre[i][1] * tile_size
             self.cur_img[x:x + tile_size, y:y + tile_size] = self.img[x:x + tile_size, y:y + tile_size].copy()
 
+        if self.agent_num == 2:
+            self.update_img_door()
+
         for i in range(self.agent_num):
             x = self.agents[i][0] * tile_size
             y = self.agents[i][1] * tile_size
             agent_tile = self.cur_img[x:x + tile_size, y:y + tile_size]
             fill_coords(agent_tile, point_in_circle(0.5, 0.5, 0.31), colors[i])
             self.cur_img[x:x + tile_size, y:y + tile_size] = agent_tile
+
+    def update_img_door(self, tile_size=30):
+        # status: 0 -- open; 1 -- locked; 2 -- unlocked
+        x, y = self.door
+        x *= tile_size
+        y *= tile_size
+        status = self.door_status
+        door_tile = create_door(tile_size, status)
+        self.cur_img[x:x + tile_size, y:y + tile_size] = door_tile
 
     def render(self, mode="human"):
         if not self.window:

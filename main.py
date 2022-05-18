@@ -3,6 +3,7 @@ import numpy as np
 import torch
 
 from envs.gridworld import GridWorldEnv
+from envs.appledoor import AppleDoorEnv
 from envs.mpe.environment import MPEEnv
 from algos.reinforce import REINFORCE
 from algos.ppo import PPO
@@ -18,13 +19,18 @@ parser.add_argument("--scenario_name", default="simple_spread")
 parser.add_argument('--num_agents', default=3, type=int, help='Number of agents')
 parser.add_argument("--use_done_func", default=False, action='store_true')
 parser.add_argument('--max_steps', default=25, type=int)
-
+parser.add_argument('--mpe_aid', default=-1, type=int)
+parser.add_argument('--mpe_tid', default=-1, type=int)
+parser.add_argument("--mpe_fixed_map", default=False, action='store_true')
+parser.add_argument("--mpe_sparse_reward", default=False, action='store_true')
+parser.add_argument("--mpe_not_share_reward", default=False, action='store_true')
 parser.add_argument("--dense_reward", default=False, action='store_true')
 parser.add_argument("--local_obs", default=False, action='store_true')
 
 parser.add_argument("--algo", default="PPO",
                     help="algorithm to use: POfD | PPO | REINFORCE")
 parser.add_argument("--use_prior", default=False, action='store_true')
+parser.add_argument("--use_suboptimal", default=False, action='store_true')
 parser.add_argument("--ppo_epoch", default=4, type=int)
 parser.add_argument("--num_mini_batch", default=4, type=int)
 parser.add_argument("--pweight", default=0.02, type=float)
@@ -38,6 +44,8 @@ parser.add_argument("--use_gae", default=False, action='store_true')
 
 parser.add_argument("--frames", type=int, default=5000000)
 parser.add_argument('--run', type=int, default=-1)
+
+parser.add_argument("--save_interval", default=False, action='store_true')
 args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -54,8 +62,17 @@ if "centerSquare" in args.env:
     env_name = args.env
     env = GridWorldEnv(env_name, dense_reward=args.dense_reward)
     args.local_obs = False
+elif "appleDoor" in args.env:
+    env_name = args.env
+    env = AppleDoorEnv(env_name, dense_reward=args.dense_reward)
+    args.local_obs = False
 elif "mpe" in args.env:
-    env_name = "mpe_" + args.scenario_name + "_" + str(args.num_agents) + "a"
+    env_name = "mpeSparse_" if args.mpe_sparse_reward else "mpe_"
+    if args.mpe_fixed_map:
+        env_name += "fixedMap_"
+    if args.mpe_not_share_reward:
+        env_name += "decen_"
+    env_name += args.scenario_name + "_" + str(args.num_agents) + "a"
     env = MPEEnv(args)
     args.local_obs = True
 else:
@@ -66,13 +83,13 @@ action_dim = env.action_space[0].n
 agent_num = env.agent_num
 
 # setup logging directory
-root_dir = "outputs_lava"
+root_dir = "outputs_appleDoor"
 model_dir = utils.get_model_dir_name(root_dir, env_name, args)
 print("Model save at: ", model_dir)
 
 # setup priors
 if args.use_prior:
-    prior = utils.load_prior(env_name, use_suboptimal=True)
+    prior = utils.load_prior(env_name, use_suboptimal=args.use_suboptimal)
 else:
     prior = None
 
@@ -88,8 +105,8 @@ elif args.algo == "PPO":
     max_len += env.max_steps
 elif args.algo == "POfD":
     use_expert_traj = True
-    max_len = 4096
-    expert_traj = utils.load_expert_trajectory(env_name, use_suboptimal=True)
+    max_len = 4096 * 2
+    expert_traj = utils.load_expert_trajectory(env_name, use_suboptimal=args.use_suboptimal)
     algo = POfD(env, args, expert_traj, target_steps=max_len)
     max_len += env.max_steps
 else:
@@ -100,7 +117,7 @@ tb_writer = utils.tb_writer(model_dir, agent_num, args.use_prior)
 
 # try to load existing models
 try:
-    status = torch.load(model_dir + "/best_status.pt", map_location=device)
+    status = torch.load(model_dir + "/last_status.pt", map_location=device)
     algo.load_status(status)
     update = status["update"]
     num_frames = status["num_frames"]
@@ -134,8 +151,8 @@ while num_frames < target_frames:
         if args.use_prior or use_expert_traj:
             status["pweight"] = algo.pweight
         torch.save(status, model_dir + "/last_status.pt")
-        # if update % 10 == 0:
-        #     torch.save(status, model_dir + "/status_" + str(update) + "_" + str(num_frames) + ".pt")
+        if args.save_interval and update % 10 == 0:
+            torch.save(status, model_dir + "/status_" + str(update) + "_" + str(num_frames) + ".pt")
         if np.all(avg_returns > best_return):
             best_return = avg_returns.copy()
             torch.save(status, model_dir + "/best_status.pt")
